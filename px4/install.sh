@@ -15,5 +15,5 @@ grep -q 4099_gz_gh_x500 "$AIRFRAMES/CMakeLists.txt" ||
 grep -q 4099_gz_gh_x500 "$AIRFRAMES/CMakeLists.txt" || { echo "could not register airframe" >&2; exit 1; }
 
 PYTHONPATH="$HERE/..${PYTHONPATH:+:$PYTHONPATH}" "$PY" -m rowpilot world \
-  --template "$GZ/worlds/default.sdf" --out "$GZ/worlds/greenhouse.sdf"
+  --template "$GZ/worlds/default.sdf" --out "$GZ/worlds/greenhouse.sdf" --assets-dir "$GZ/models/greenhouse_assets"
 echo "Installed. Rebuild with: make -C $PX4 px4_sitl"

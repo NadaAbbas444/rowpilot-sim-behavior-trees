@@ -21,7 +21,7 @@ jobs:
       - run: pytest -q
       # Example missions: nominal, low battery, and a VO dropout. Exit code is non-zero on a crash.
       - run: python -m rowpilot run --quiet --out runs/nominal
-      - run: python -m rowpilot run --quiet --battery 60 --out runs/low-battery
+      - run: python -m rowpilot run --quiet --battery 45 --out runs/low-battery
       - run: python -m rowpilot run --quiet --vo-dropout 60:1.5 --vo-dropout 200:10 --out runs/vo-dropout
       - uses: actions/upload-artifact@v4
         if: matrix.python-version == '3.12'

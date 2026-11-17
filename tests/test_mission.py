@@ -43,7 +43,7 @@ def test_strong_gusts_still_safe(seed):
 
 
 def test_low_battery_returns_home_and_lands():
-    r = run(layout=GreenhouseLayout(), start_battery_pct=60)
+    r = run(layout=GreenhouseLayout(), start_battery_pct=45)
     assert r.outcome == "aborted: battery low"
     assert 0 < len(r.lanes_completed) < 6
     assert r.trace[-1]["z"] < 0.05

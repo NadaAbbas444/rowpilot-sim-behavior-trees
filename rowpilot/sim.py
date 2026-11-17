@@ -37,6 +37,8 @@ class SimConfig:
     depth_rays: int = 64
     depth_max_range: float = 6.0
     depth_noise_m: float = 0.01
+    depth_dropout: float = 0.05  # share of pixels with no depth (dark leaves, edges)
+    foliage_m: float = 0.14  # how far leaves stick out of the crop face into the lane
     drone_radius: float = 0.25
 
 
@@ -58,6 +60,9 @@ class SimVehicle:
         self._faces = np.array(layout.crop_face_ys())
         self._centers = np.array(layout.crop_row_centers_y())
         self._ends_x = np.array([0.0, layout.row_length])
+        frng = np.random.default_rng(1000 + self.cfg.seed)
+        self._fol_k = frng.uniform(2.0, 9.0, (len(self._faces), 4))  # leaf-scale waves, per face
+        self._fol_ph = frng.uniform(0, 2 * np.pi, (len(self._faces), 4))
 
     # ---- Vehicle interface -------------------------------------------------------------
     def vo_healthy(self) -> bool:
@@ -104,7 +109,15 @@ class SimVehicle:
             t = (self._faces[None, :] - self.y) / s[:, None]  # distance along each ray to each face line
             xh = self.x + t * co[:, None]
         ok = (t > 0) & (xh >= 0) & (xh <= self.layout.row_length)
-        t = np.where(ok, t, np.inf).min(axis=1)
+        tf = np.where(ok, t, np.inf)
+        face = tf.argmin(axis=1)
+        t = tf[np.arange(len(face)), face]
+        # Foliage: leaves stick out of the crop face by up to foliage_m, varying along the row
+        # (the same leaves every time the drone passes), so the face the camera sees is ragged.
+        hit_x = xh[np.arange(len(face)), face]
+        p = c.foliage_m * self._foliage(face, hit_x)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = np.where(np.isfinite(t), np.maximum(0.05, t - p / np.abs(s)), t)
         # Short end faces of each crop row, at x = 0 and x = row_length.
         with np.errstate(divide="ignore", invalid="ignore"):
             te = (self._ends_x[None, :] - self.x) / co[:, None]
@@ -112,9 +125,15 @@ class SimVehicle:
         half = self.layout.crop_width / 2
         on_end = (np.abs(yh[:, :, None] - self._centers[None, None, :]) <= half).any(axis=2)
         t = np.minimum(t, np.where((te > 0) & on_end, te, np.inf).min(axis=1))
-        hit = t <= c.depth_max_range
+        hit = (t <= c.depth_max_range) & (self.rng.random(len(t)) >= c.depth_dropout)
         r = t[hit] + self.rng.normal(0, c.depth_noise_m, hit.sum()) * (1 + t[hit] ** 2 / 4)
         return np.column_stack([r * np.cos(a[hit]), r * np.sin(a[hit])])
+
+    def _foliage(self, face: np.ndarray, x: np.ndarray) -> np.ndarray:
+        """How far (0..1 of foliage_m) leaves stick out at position x along a crop face."""
+        with np.errstate(invalid="ignore"):
+            w = np.sin(self._fol_k[face] * x[:, None] + self._fol_ph[face]).mean(axis=1)
+        return np.nan_to_num(np.clip(0.5 + w, 0.0, 1.0))
 
     # ---- simulation ---------------------------------------------------------------------
     def step(self, dt: float) -> None:

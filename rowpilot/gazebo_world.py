@@ -1,11 +1,16 @@
 """Generate a Gazebo (Harmonic) greenhouse world from the same GreenhouseLayout the Python simulator uses.
 
 The world frame is the map frame (ENU: x along the rows, y across them), so a pose in Gazebo is a
-pose in the mission's map frame. Crop rows are static boxes with collision, so a lidar or depth
-camera sees them and a drone that drifts into one actually hits it.
+pose in the mission's map frame.
+
+Each crop row is an invisible collision box (so a drone that drifts into the crop hits it) filled
+with procedural tomato plants (see greenhouse_assets.py). The lanes have the heating-pipe rails of a
+tomato greenhouse, the floor has a gritty concrete texture (visual odometry needs features to track),
+steel posts stand in the crop rows, and yellow sticky tape hangs above each row at 2.8 m.
+Without plant meshes (plants=None) the rows are plain green boxes, which is quicker to render.
 
 PX4 needs its own world plugins (physics, sensors, IMU, magnetometer, ...). Rather than copy them,
-pass PX4's `Tools/simulation/gz/worlds/default.sdf` as the template: the rows are inserted into it.
+pass PX4's `Tools/simulation/gz/worlds/default.sdf` as the template: everything is inserted into it.
 """
 
 from __future__ import annotations
@@ -13,50 +18,125 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import numpy as np
+
 from .layout import GreenhouseLayout
 
-ROW_TEMPLATE = """
-    <model name="{name}">
-      <static>true</static>
-      <pose>{x:.3f} {y:.3f} {z:.3f} 0 0 0</pose>
-      <link name="link">
-        <collision name="collision">
-          <geometry><box><size>{lx:.3f} {ly:.3f} {lz:.3f}</size></box></geometry>
-        </collision>
-        <visual name="visual">
-          <geometry><box><size>{lx:.3f} {ly:.3f} {lz:.3f}</size></box></geometry>
-          <material>
-            <ambient>0.25 0.45 0.15 1</ambient>
-            <diffuse>0.30 0.55 0.20 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>"""
+ASSETS = "model://greenhouse_assets/meshes"
+PLANT_SPACING_M = 0.25  # about 2 stems per m2 with a 2 m row pitch
+PIPE_OFFSET_M = 0.275  # each pipe rail is this far from the lane centre (55 cm rail gauge)
+PIPE_RADIUS_M = 0.0255  # 51 mm heating pipe
+TAPE_HEIGHT_M = 2.8
 
 
-def crop_row_models(layout: GreenhouseLayout) -> str:
-    h = layout.canopy_height
-    return "".join(
-        ROW_TEMPLATE.format(
-            name=f"crop_row_{k}",
-            x=layout.row_length / 2,
-            y=c,
-            z=h / 2,
-            lx=layout.row_length,
-            ly=layout.crop_width,
-            lz=h,
+def _static(name: str, body: str, pose=(0, 0, 0, 0, 0, 0)) -> str:
+    p = " ".join(f"{v:.4f}" for v in pose)
+    return f'\n    <model name="{name}">\n      <static>true</static>\n      <pose>{p}</pose>\n{body}    </model>'
+
+
+def _box_link(size, colour=None, collision=True, visual=True) -> str:
+    s = " ".join(f"{v:.4f}" for v in size)
+    geo = f"<geometry><box><size>{s}</size></box></geometry>"
+    out = '      <link name="link">\n'
+    if collision:
+        out += f'        <collision name="collision">{geo}</collision>\n'
+    if visual:
+        r, g, b = colour
+        out += (
+            f'        <visual name="visual">{geo}<material><ambient>{r} {g} {b} 1</ambient>'
+            f"<diffuse>{r} {g} {b} 1</diffuse></material></visual>\n"
         )
-        for k, c in enumerate(layout.crop_row_centers_y())
+    return out + "      </link>\n"
+
+
+def crop_rows(layout: GreenhouseLayout, plants: list[str] | None, seed: int = 0) -> str:
+    """One model per crop row: a collision box, and either plant meshes or a green box as visuals."""
+    h, L, w = layout.canopy_height, layout.row_length, layout.crop_width
+    rng = np.random.default_rng(seed)
+    out = []
+    for k, c in enumerate(layout.crop_row_centers_y()):
+        geo = f"<geometry><box><size>{L:.4f} {w:.4f} {h:.4f}</size></box></geometry>"
+        body = '      <link name="link">\n'
+        body += f'        <collision name="collision"><pose>{L / 2:.4f} 0 {h / 2:.4f} 0 0 0</pose>{geo}</collision>\n'
+        if not plants:
+            body += (
+                f'        <visual name="visual"><pose>{L / 2:.4f} 0 {h / 2:.4f} 0 0 0</pose>{geo}'
+                "<material><ambient>0.25 0.45 0.15 1</ambient><diffuse>0.30 0.55 0.20 1</diffuse>"
+                "</material></visual>\n"
+            )
+        else:
+            for i, x in enumerate(np.arange(PLANT_SPACING_M / 2, L, PLANT_SPACING_M)):
+                x += rng.normal(0, 0.03)
+                y = (0.06 if i % 2 else -0.06) + rng.normal(0, 0.015)  # zig-zag, as plants are trained
+                yaw = rng.choice([0.0, np.pi]) + rng.normal(0, 0.2)
+                s = rng.uniform(0.9, 1.08)
+                mesh = plants[int(rng.integers(0, len(plants)))]
+                # Leaves are trained along the row: squeeze the plant across it.
+                body += (
+                    f'        <visual name="plant_{i}"><pose>{x:.3f} {y:.3f} 0 0 0 {yaw:.3f}</pose>'
+                    f"<geometry><mesh><uri>{ASSETS}/{mesh}</uri>"
+                    f"<scale>{s:.3f} {0.55 * s:.3f} {s:.3f}</scale></mesh></geometry></visual>\n"
+                )
+        body += "      </link>\n"
+        out.append(_static(f"crop_row_{k}", body, (0, c, 0, 0, 0, 0)))
+    return "".join(out)
+
+
+def infrastructure(layout: GreenhouseLayout, textured_floor: bool) -> str:
+    L, out = layout.row_length, []
+    # Heating-pipe rails in every lane.
+    for i in range(layout.n_lanes):
+        for s in (-1, 1):
+            y = layout.lane_center_y(i) + s * PIPE_OFFSET_M
+            geo = f"<geometry><cylinder><radius>{PIPE_RADIUS_M}</radius><length>{L:.4f}</length></cylinder></geometry>"
+            body = (
+                '      <link name="link">\n'
+                f'        <collision name="collision">{geo}</collision>\n'
+                f'        <visual name="visual">{geo}<material><ambient>0.55 0.55 0.57 1</ambient>'
+                "<diffuse>0.7 0.7 0.72 1</diffuse><specular>0.6 0.6 0.6 1</specular></material></visual>\n"
+                "      </link>\n"
+            )
+            out.append(_static(f"pipe_{i}_{'l' if s > 0 else 'r'}", body, (L / 2, y, 0.12, 0, np.pi / 2, 0)))
+    # Steel posts inside the crop rows every ~4 m, and the yellow sticky tape above each row.
+    for k, c in enumerate(layout.crop_row_centers_y()):
+        for j, x in enumerate(np.arange(0.0, L + 0.01, L / max(1, round(L / 4.0)))):
+            out.append(_static(f"post_{k}_{j}", _box_link((0.08, 0.08, 4.0), (0.6, 0.6, 0.62)), (x, c, 2.0, 0, 0, 0)))
+        out.append(
+            _static(
+                f"tape_{k}",
+                _box_link((L, 0.003, 0.25), (0.95, 0.85, 0.05), collision=False),
+                (L / 2, c, TAPE_HEIGHT_M, 0, 0, 0),
+            )
+        )
+    # Floor covering the greenhouse, slightly above PX4's ground plane to avoid z-fighting.
+    x0, x1 = layout.home[0] - 2.0, L + layout.headland + 2.0
+    y0, y1 = -layout.pitch - 1.0, layout.n_lanes * layout.pitch + 1.0
+    geo = f"<geometry><box><size>{x1 - x0:.3f} {y1 - y0:.3f} 0.002</size></box></geometry>"
+    mat = (
+        f"<material><diffuse>1 1 1 1</diffuse><pbr><metal><albedo_map>{ASSETS}/floor.png</albedo_map>"
+        "<roughness>0.9</roughness></metal></pbr></material>"
+        if textured_floor
+        else "<material><diffuse>0.6 0.6 0.6 1</diffuse></material>"
     )
+    body = f'      <link name="link">\n        <visual name="visual">{geo}{mat}</visual>\n      </link>\n'
+    out.append(_static("floor", body, ((x0 + x1) / 2, (y0 + y1) / 2, 0.001, 0, 0, 0)))
+    return "".join(out)
 
 
-def make_world(layout: GreenhouseLayout, template_sdf: str, world_name: str = "greenhouse") -> str:
-    """Insert the crop rows into a PX4 world SDF and rename the world."""
+def make_world(
+    layout: GreenhouseLayout,
+    template_sdf: str,
+    world_name: str = "greenhouse",
+    plants: list[str] | None = None,
+    seed: int = 0,
+) -> str:
+    """Insert the greenhouse into a PX4 world SDF and rename the world."""
     sdf, n = re.subn(r'<world name="[^"]*">', f'<world name="{world_name}">', template_sdf, count=1)
     if n != 1 or "</world>" not in sdf:
         raise ValueError("template is not a single-world SDF file")
     head, tail = sdf.rsplit("</world>", 1)
-    return f"{head}{crop_row_models(layout)}\n  </world>{tail}"
+    content = crop_rows(layout, plants, seed) + infrastructure(layout, textured_floor=bool(plants))
+    return f"{head}{content}\n  </world>{tail}"
 
 
 def spawn_pose(layout: GreenhouseLayout, z: float = 0.25) -> str:
@@ -65,6 +145,20 @@ def spawn_pose(layout: GreenhouseLayout, z: float = 0.25) -> str:
     return f"{hx},{hy},{z},0,0,0"
 
 
-def write_world(layout: GreenhouseLayout, template_path: Path, out_path: Path, world_name: str = "greenhouse") -> Path:
-    out_path.write_text(make_world(layout, template_path.read_text(encoding="utf-8-sig"), world_name))
+def write_world(
+    layout: GreenhouseLayout,
+    template_path: Path,
+    out_path: Path,
+    world_name: str = "greenhouse",
+    assets_dir: Path | None = None,
+    seed: int = 0,
+) -> Path:
+    """Write the world. With assets_dir (a Gazebo model folder, e.g. <PX4>/Tools/simulation/gz/models/
+    greenhouse_assets), plant meshes and the floor texture are generated there and used."""
+    plants = None
+    if assets_dir is not None:
+        from .greenhouse_assets import write_plant_model
+
+        plants = write_plant_model(assets_dir, height=layout.canopy_height, seed=seed)
+    out_path.write_text(make_world(layout, template_path.read_text(encoding="utf-8-sig"), world_name, plants, seed))
     return out_path

@@ -1,7 +1,7 @@
 """Command line: run a mission, print the tree.
 
 python -m rowpilot run --out runs/nominal
-python -m rowpilot run --battery 60 --out runs/low-battery
+python -m rowpilot run --battery 45 --out runs/low-battery
 python -m rowpilot run --vo-dropout 30:1.5 --vo-dropout 120:10 --out runs/vo
 python -m rowpilot tree
 """
@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("run", "tree", "world", "px4"):
         sp = sub.add_parser(name)
         sp.add_argument("--lanes", type=int, default=6)
-        sp.add_argument("--length", type=float, default=40.0, help="row length (m)")
+        sp.add_argument("--length", type=float, default=GreenhouseLayout.row_length, help="row length (m)")
         sp.add_argument("--path-width", type=float, default=1.6, help="free lane width (m)")
     r = sub.choices["run"]
     r.add_argument("--seed", type=int, default=0)
@@ -54,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     w = sub.choices["world"]
     w.add_argument("--template", type=Path, required=True, help="PX4 Tools/simulation/gz/worlds/default.sdf")
     w.add_argument("--out", type=Path, required=True)
+    w.add_argument("--assets-dir", type=Path, help="Gazebo model folder for plant meshes; omit for plain boxes")
     x = sub.choices["px4"]
     x.add_argument("--url", default="udpin://0.0.0.0:14540", help="MAVLink connection to PX4")
     x.add_argument("--world", default="greenhouse")
@@ -66,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "world":
         from .gazebo_world import spawn_pose, write_world
 
-        write_world(layout, a.template, a.out)
+        write_world(layout, a.template, a.out, assets_dir=a.assets_dir)
         print(f"wrote {a.out}; spawn with PX4_GZ_MODEL_POSE={spawn_pose(layout)}")
         return 0
 

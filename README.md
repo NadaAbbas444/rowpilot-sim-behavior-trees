@@ -14,7 +14,7 @@ The core of this repo is the part that does not depend on a simulator or the har
 
 ![Low-battery run: three lanes swept, then back home along a lane and landed](docs/low-battery-run.png)
 
-*`python -m rowpilot run --battery 60`: the reserve is reached at the start of lane 4, so the tree flies home along the lane (not through the crop) and lands. Blue is the true path; dashed orange is what visual odometry believed.*
+*`python -m rowpilot run --battery 45`: the reserve is reached at the start of lane 4, so the tree flies home along the lane (not through the crop) and lands. Blue is the true path; dashed orange is what visual odometry believed.*
 
 ## Run it
 
@@ -23,7 +23,7 @@ python3 -m venv .venv && source .venv/bin/activate   # Ubuntu: sudo apt install 
 pip install -U pip && pip install -e ".[dev]"
 python -m rowpilot tree                                    # print the behaviour tree
 python -m rowpilot run --out runs/nominal                  # full 6-lane greenhouse
-python -m rowpilot run --battery 60 --out runs/low-battery # returns home on the reserve
+python -m rowpilot run --battery 45 --out runs/low-battery # returns home on the reserve
 python -m rowpilot run --vo-dropout 60:1.5 --vo-dropout 200:10 --out runs/vo
 pytest -q
 ```

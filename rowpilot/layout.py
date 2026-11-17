@@ -15,7 +15,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class GreenhouseLayout:
     n_lanes: int = 6
-    row_length: float = 40.0  # m, length of the crop rows (x from 0 to row_length)
+    row_length: float = 40.0 / 3  # m, length of the crop rows (x from 0 to row_length)
     path_width: float = 1.6  # m, free width of a lane between the two crop faces
     crop_width: float = 0.4  # m, width of one crop row
     canopy_height: float = 2.6  # m
