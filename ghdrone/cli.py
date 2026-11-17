@@ -36,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="ghdrone", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name in ("run", "tree"):
+    for name in ("run", "tree", "world", "px4"):
         sp = sub.add_parser(name)
         sp.add_argument("--lanes", type=int, default=6)
         sp.add_argument("--length", type=float, default=40.0, help="row length (m)")
@@ -51,8 +51,31 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--out", type=Path, help="directory for events.jsonl, trace.csv, summary.json, path.png")
     r.add_argument("--quiet", action="store_true")
     sub.choices["tree"].add_argument("--json", action="store_true", help="nodes and edges for a node editor")
+    w = sub.choices["world"]
+    w.add_argument("--template", type=Path, required=True, help="PX4 Tools/simulation/gz/worlds/default.sdf")
+    w.add_argument("--out", type=Path, required=True)
+    x = sub.choices["px4"]
+    x.add_argument("--url", default="udpin://0.0.0.0:14540", help="MAVLink connection to PX4")
+    x.add_argument("--world", default="greenhouse")
+    x.add_argument("--model", default="x500_greenhouse_0")
+    x.add_argument("--max-time", type=float, default=900.0)
+    x.add_argument("--out", type=Path)
     a = p.parse_args(argv)
     layout = _layout(a)
+
+    if a.cmd == "world":
+        from .gazebo_world import spawn_pose, write_world
+
+        write_world(layout, a.template, a.out)
+        print(f"wrote {a.out}; spawn with PX4_GZ_MODEL_POSE={spawn_pose(layout)}")
+        return 0
+
+    if a.cmd == "px4":
+        from .px4 import run_px4
+
+        res = run_px4(layout, MissionParams(), a.url, a.world, a.model, a.max_time, a.out)
+        print(json.dumps(res, indent=1))
+        return 0 if res["outcome"] != "crashed" else 1
 
     if a.cmd == "tree":
         root = build_tree(MissionContext(SimVehicle(layout), layout))

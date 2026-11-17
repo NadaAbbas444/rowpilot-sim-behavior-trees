@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+# @name Gazebo x500 greenhouse (vision odometry, forward lidar, no GPS)
+#
+# @type Quadrotor
+#
+
+PX4_SIM_MODEL=${PX4_SIM_MODEL:=x500_greenhouse}
+
+. ${R}etc/init.d-posix/airframes/4001_gz_x500
+
+# Indoors: no GPS and no magnetometer; position, height and yaw come from external vision.
+param set-default SIM_GPS_USED 0
+param set-default SYS_HAS_GPS 0
+param set-default SYS_HAS_MAG 0
+param set-default EKF2_GPS_CTRL 0
+param set-default EKF2_MAG_TYPE 5
+param set-default EKF2_EV_CTRL 15
+param set-default EKF2_HGT_REF 3
+param set-default EKF2_BARO_CTRL 0
+param set-default EKF2_EV_DELAY 0
+param set-default COM_ARM_WO_GPS 1
+
+# Flown by the companion computer in offboard mode, no RC and no ground station link required.
+param set-default COM_RC_IN_MODE 4
+param set-default COM_RCL_EXCEPT 4
+param set-default NAV_DLL_ACT 0
+
+# Simulated battery drains over about 15 minutes, down to 10 %.
+param set-default SIM_BAT_DRAIN 900
+param set-default SIM_BAT_MIN_PCT 10

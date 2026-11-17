@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sdf version="1.9">
+  <model name="x500_greenhouse">
+    <include merge="true">
+      <uri>x500</uri>
+    </include>
+    <!-- External-vision odometry into PX4 (EKF2 fuses it like VO on the real drone). -->
+    <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
+      <dimensions>3</dimensions>
+      <gaussian_noise>0.01</gaussian_noise>
+    </plugin>
+    <!-- Forward horizontal scan at the nose; the bridge keeps the RealSense field of view (87 deg). -->
+    <include merge="true">
+      <uri>model://lidar_2d_v2</uri>
+      <pose>.12 0 .26 0 0 0</pose>
+    </include>
+    <joint name="LidarJoint" type="fixed">
+      <parent>base_link</parent>
+      <child>link</child>
+      <pose relative_to="base_link">.12 0 .26 0 0 0</pose>
+    </joint>
+  </model>
+</sdf>
