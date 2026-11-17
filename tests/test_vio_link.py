@@ -6,8 +6,10 @@ import pytest
 from rowpilot.sensors import D435i, _rot
 from rowpilot.vio_link import VioAligner, inv_T, make_T, quat_to_rot, rot_to_quat
 
+D = D435i()
 
-def imu_pose_in_G(T_M_G, body_xyz, body_yaw, d=D435i()):
+
+def imu_pose_in_G(T_M_G, body_xyz, body_yaw, d=D):
     """Where OpenVINS would report the IMU, for a body pose in the map, given a hidden M<-G transform."""
     T_M_B = make_T(_rot(0, 0, body_yaw), body_xyz)
     T_B_I = make_T(_rot(0, d.tilt, 0), [d.mount_x, 0, d.mount_z])

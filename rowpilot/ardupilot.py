@@ -97,6 +97,7 @@ class ArduPilotVehicle:
         self.msgs: dict[str, object] = {}
         self._took_off = self._landing = False
         self._origin_set = False
+        self._z_offset = 0.0  # EKF3 local height is relative to where it started; see wait_ready()
         self._lock = threading.Lock()
         self._stop = False
         self._reader = threading.Thread(target=self._read, daemon=True)
@@ -194,7 +195,7 @@ class ArduPilotVehicle:
         vio = self.aligner.get()
         vio_fresh = vio is not None and time.monotonic() - vio.wall < VIO_STALE_S
         if lp is not None:
-            x, y, z = lp.y, lp.x, -lp.z
+            x, y, z = lp.y, lp.x, -lp.z - self._z_offset
         elif vio is not None:
             x, y, z = vio.p
         else:
@@ -223,18 +224,30 @@ class ArduPilotVehicle:
         end = time.monotonic() + timeout_s
         while time.monotonic() < end:
             ekf = self._get("EKF_STATUS_REPORT")
-            if ekf is not None and self._origin_set and ekf.flags & self.mavutil.mavlink.EKF_POS_HORIZ_ABS:
+            lp, vio = self._get("LOCAL_POSITION_NED"), self.aligner.get()
+            pos_ok = ekf is not None and ekf.flags & self.mavutil.mavlink.EKF_POS_HORIZ_ABS
+            if pos_ok and self._origin_set and lp is not None and vio is not None:
+                # Standing on the ground: VIO knows the true height of the body above the floor,
+                # EKF3 reports height relative to its start. Remember the difference once.
+                self._z_offset = -lp.z - vio.p[2]
                 return
             time.sleep(0.5)
         raise TimeoutError("ArduPilot EKF3 has no position from the visual odometry")
 
-    def arm(self, timeout_s: float = 60.0) -> bool:
+    def arm(self, timeout_s: float = 60.0, takeoff_alt: float = 1.0) -> bool:
+        """GUIDED, arm, and take off at once: ArduCopter flies GUIDED velocity targets only when
+        airborne, and disarms by itself if it sits armed on the ground. The mission's Takeoff node
+        then climbs to the mission altitude with velocity targets."""
         end = time.monotonic() + timeout_s
+        mav = self.mavutil.mavlink
         while time.monotonic() < end:
-            if self.set_mode(GUIDED) and self._command(
-                self.mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 1, wait_ack=True
-            ):
-                return True
+            if self.set_mode(GUIDED) and self._command(mav.MAV_CMD_COMPONENT_ARM_DISARM, 1, wait_ack=True):
+                self._took_off = self._command(
+                    mav.MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, takeoff_alt, wait_ack=True, timeout=30.0
+                )
+                if not self._took_off:
+                    print("take-off refused", flush=True)
+                return self._took_off
             time.sleep(1.0)
         print("arming refused", flush=True)
         return False
@@ -248,13 +261,8 @@ class ArduPilotVehicle:
             self._landing = self.set_mode(LAND)
 
     def send(self, cmd: Command) -> None:
-        s = self.state()
-        if s.landed and s.armed and cmd.vz > 0.05 and not self._took_off:
-            # ArduCopter in GUIDED only flies velocity targets once airborne: take off first.
-            self._took_off = self._command(
-                self.mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 1.0, wait_ack=True
-            )
-            return
+        if self._landing:
+            return  # LAND mode is in charge
         self.conn.mav.set_position_target_local_ned_send(
             0,
             self.conn.target_system,

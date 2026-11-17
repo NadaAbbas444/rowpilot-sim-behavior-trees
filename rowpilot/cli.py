@@ -36,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="rowpilot", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name in ("run", "tree", "world", "px4"):
+    for name in ("run", "tree", "world", "px4", "ardupilot"):
         sp = sub.add_parser(name)
         sp.add_argument("--lanes", type=int, default=6)
         sp.add_argument("--length", type=float, default=GreenhouseLayout.row_length, help="row length (m)")
@@ -62,6 +62,11 @@ def main(argv: list[str] | None = None) -> int:
     x.add_argument("--model", default="gh_x500_0")
     x.add_argument("--max-time", type=float, default=900.0)
     x.add_argument("--out", type=Path)
+    ap = sub.choices["ardupilot"]
+    ap.add_argument("--url", default="tcp:127.0.0.1:5760", help="MAVLink connection to ArduPilot SITL")
+    ap.add_argument("--max-sim-time", type=float, default=900.0)
+    ap.add_argument("--home-z", type=float, default=0.195, help="body height above the floor at rest (m)")
+    ap.add_argument("--out", type=Path)
     a = p.parse_args(argv)
     layout = _layout(a)
 
@@ -78,6 +83,13 @@ def main(argv: list[str] | None = None) -> int:
         res = run_px4(layout, MissionParams(), a.url, a.world, a.model, a.max_time, a.out)
         print(json.dumps(res, indent=1))
         return 0 if res["outcome"] != "crashed" else 1
+
+    if a.cmd == "ardupilot":
+        from .ardupilot import run_ardupilot
+
+        res = run_ardupilot(layout, MissionParams(), a.url, max_sim_time_s=a.max_sim_time, out=a.out, home_z=a.home_z)
+        print(json.dumps(res, indent=1))
+        return 0
 
     if a.cmd == "tree":
         root = build_tree(MissionContext(SimVehicle(layout), layout))
