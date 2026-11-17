@@ -36,5 +36,9 @@ class Vehicle(Protocol):
     def send(self, cmd: Command) -> None:
         """Body-frame velocity setpoint, held until the next one."""
 
+    def land(self) -> None:
+        """Hand over to the flight controller's own landing (descend, detect touchdown, disarm).
+        Called every tick until landed, so it must be idempotent."""
+
     def depth_scan(self) -> np.ndarray:
         """Horizontal depth scan as body-frame points (N, 2): x forward, y left."""

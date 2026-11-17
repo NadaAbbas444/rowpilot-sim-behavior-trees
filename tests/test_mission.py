@@ -86,3 +86,15 @@ def test_events_stream_live():
     run_mission(RunConfig(layout=GreenhouseLayout(n_lanes=1, row_length=8.0)), on_event=seen.append)
     assert {"status", "log"} <= {e["type"] for e in seen}
     assert seen[-1] == {"t": seen[-1]["t"], "type": "end", "node": "Root", "msg": "completed"}
+
+
+def test_frequent_vo_glitches_resume_without_replanning():
+    """Glitches in the middle of legs must not send the drone back to the start of the leg."""
+    glitches = [(t, 0.4) for t in range(8, 200, 7)]
+    r = run(vo_dropouts=glitches)
+    assert r.outcome == "completed", r.outcome
+    assert r.lanes_completed == [0, 1, 2]
+    for node in ("Lane 2: GoToEntry", "Lane 3: GoToEntry", "ReturnHome"):
+        plans = [e for e in r.events if e["type"] == "log" and e["node"] == node and e["msg"].startswith("waypoints")]
+        assert len(plans) == 1, node
+    assert all(any(e["msg"].startswith(f"lane {i} swept") for e in r.events if e["type"] == "log") for i in (1, 2, 3))

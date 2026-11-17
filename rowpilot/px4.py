@@ -5,9 +5,10 @@ Px4Vehicle implements the Vehicle interface over MAVSDK:
   send()        offboard body-frame velocity setpoints
   depth_scan()  the forward Gazebo lidar, cropped to the RealSense field of view
 
-Frames: the Gazebo world is the mission's map frame (ENU, x along the rows). PX4 reports a local NED
-frame whose origin is where it booted (the spawn point = layout.home), so
-  map x = east + home_x,  map y = north + home_y,  map yaw = 90 deg - heading.
+Frames: the Gazebo world is the mission's map frame (ENU, x along the rows). The vision odometry is
+reported in that world frame, so PX4's local NED frame shares its origin:
+  map x = east,  map y = north,  map yaw = 90 deg - yaw (yaw from attitude: without GPS, PX4 sends no
+  global position message, so MAVSDK's heading() stays NaN).
 On the real drone, swap the lidar for a row of the RealSense depth image; the rest stays the same.
 
 Needs: pip install mavsdk, and Gazebo's Python bindings (python3-gz-transport13, python3-gz-msgs10).
@@ -31,6 +32,7 @@ from .vehicle import VehicleState
 
 REALSENSE_HFOV_DEG = 87.0
 LIDAR_FORWARD_OFFSET_M = 0.12
+VO_LOST_DEBOUNCE_S = 0.5
 
 
 class GazeboFeeds:
@@ -88,51 +90,85 @@ class Px4Vehicle:
         if self.system is None:
             raise RuntimeError(f"no PX4 autopilot on {url}")
         self.tel, self.offboard, self.action = Telemetry(self.system), Offboard(self.system), Action(self.system)
-        self.t0 = time.monotonic()
+        self.t0 = self._vo_last_ok = time.monotonic()
+        self._landing = False
 
     def wait_ready(self, timeout_s: float = 120.0) -> None:
-        """Wait until EKF2 has a local position from the vision odometry and PX4 is ready to arm."""
+        """Wait until EKF2 has a local position (from the vision odometry) and a heading.
+
+        MAVSDK's is_armable is not used: without GPS it can stay False although PX4 is ready.
+        Arming itself is retried in arm(), which reports PX4's own refusal reason."""
         end = time.monotonic() + timeout_s
         while time.monotonic() < end:
-            h = self.tel.health()
-            if h.is_local_position_ok and h.is_armable:
+            if self.tel.health().is_local_position_ok and math.isfinite(self.tel.attitude_euler().yaw_deg):
                 return
             time.sleep(0.5)
-        raise TimeoutError(f"PX4 not ready to arm: {vars(self.tel.health())}")
+        raise TimeoutError(f"PX4 has no local position from vision odometry: {vars(self.tel.health())}")
 
     def state(self) -> VehicleState:
         pv = self.tel.position_velocity_ned().position
-        hx, hy = self.layout.home
-        yaw = math.radians(90.0 - self.tel.heading().heading_deg)
+        yaw = math.radians(90.0 - self.tel.attitude_euler().yaw_deg)
         yaw = (yaw + math.pi) % (2 * math.pi) - math.pi
         landed = self.tel.landed_state() == self._ON_GROUND
+        # Debounce: MAVSDK's local-position flag drops out for single status messages; only a loss
+        # that lasts VO_LOST_DEBOUNCE_S counts as lost tracking.
+        now = time.monotonic()
+        if self.tel.health().is_local_position_ok:
+            self._vo_last_ok = now
+        vo_ok = now - self._vo_last_ok < VO_LOST_DEBOUNCE_S
         return VehicleState(
             t=time.monotonic() - self.t0,
-            x=pv.east_m + hx,
-            y=pv.north_m + hy,
+            x=pv.east_m,
+            y=pv.north_m,
             z=0.0 if landed else -pv.down_m,
             yaw=yaw,
-            vo_healthy=self.tel.health().is_local_position_ok,
+            vo_healthy=vo_ok,
             battery_pct=self.tel.battery().remaining_percent,
             armed=self.tel.armed(),
             landed=landed,
         )
 
-    def arm(self) -> bool:
-        self.action.arm()
-        # PX4 needs a setpoint stream before offboard mode is accepted.
-        for _ in range(10):
-            self.send(Command())
-            time.sleep(0.05)
-        self.offboard.start()
-        return self.tel.armed()
+    def arm(self, timeout_s: float = 30.0) -> bool:
+        """Switch to offboard, then arm. Offboard needs only a local position (no GPS, no RC), while
+        PX4's default Hold mode needs a global position, so arming in Hold is refused indoors."""
+        from mavsdk.plugins.action import ActionError
+        from mavsdk.plugins.offboard import OffboardError
+
+        end = time.monotonic() + timeout_s
+        while True:
+            try:
+                for _ in range(10):  # PX4 needs a setpoint stream before it accepts offboard
+                    self.send(Command())
+                    time.sleep(0.05)
+                self.offboard.start()
+                self.action.arm()
+                for _ in range(30):  # telemetry reports the armed state a moment after the command
+                    if self.tel.armed():
+                        return True
+                    time.sleep(0.1)
+                return False
+            except (ActionError, OffboardError) as e:  # e.g. estimator still settling after boot
+                if time.monotonic() > end:
+                    print(f"arming refused: {e}", flush=True)
+                    return False
+                time.sleep(1.0)
+
+    def land(self) -> None:
+        """PX4 Land mode: it controls the descent, detects touchdown and disarms itself.
+        (In offboard velocity mode PX4's land detector never confirms the touchdown.)"""
+        if not self._landing:
+            self.action.land()
+            self._landing = True
 
     def disarm(self) -> None:
+        from mavsdk.plugins.offboard import OffboardError
+
         try:
             self.offboard.stop()
-        finally:
-            if self.tel.armed():
-                self.action.disarm()
+        except OffboardError:
+            pass  # already out of offboard, e.g. in Land mode
+        if self.tel.armed():
+            self.action.disarm()
 
     def send(self, cmd: Command) -> None:
         # Mission body frame is forward-left-up with CCW yaw; MAVSDK is forward-right-down with CW yaw.

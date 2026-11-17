@@ -88,6 +88,10 @@ class SimVehicle:
     def send(self, cmd: Command) -> None:
         self.cmd = cmd
 
+    def land(self) -> None:
+        """Like a flight controller's land mode: hold position, descend, slow near the ground."""
+        self.cmd = Command(vz=-0.5 if self.z > 0.4 else -0.25)
+
     def depth_scan(self) -> np.ndarray:
         """Cast a horizontal fan of rays and return the nearest crop-face hit of each (body frame)."""
         if self.landed or self.z > self.layout.canopy_height:

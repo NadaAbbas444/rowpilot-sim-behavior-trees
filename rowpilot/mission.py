@@ -233,6 +233,10 @@ class GoTo(Once):
         self.waypoints_fn, self.final_yaw = waypoints, final_yaw
 
     def start(self) -> None:
+        if getattr(self, "wps", None):  # interrupted earlier (e.g. a VO glitch): carry on, don't re-plan
+            self.leg_start = (self.ctx.s.x, self.ctx.s.y)
+            self.log("resuming towards " + ", ".join(f"({x:.1f}, {y:.1f})" for x, y in self.wps))
+            return
         self.wps = list(self.waypoints_fn())
         self.leg_start = (self.ctx.s.x, self.ctx.s.y)
         self.log("waypoints " + ", ".join(f"({x:.1f}, {y:.1f})" for x, y in self.wps))
@@ -299,7 +303,8 @@ class SweepLane(Once):
     def start(self) -> None:
         self.follower.reset()
         self.lost_since: float | None = None
-        self.offsets: list[float] = []
+        if not hasattr(self, "offsets"):  # keep the statistics across interruptions
+            self.offsets: list[float] = []
 
     def run(self) -> Status:
         c, est, lay = self.ctx, self.ctx.lane, self.ctx.layout
@@ -338,12 +343,12 @@ class SweepLane(Once):
 
 
 def land_step(ctx: MissionContext) -> bool:
-    """Descend; disarm on touchdown. Returns True once landed."""
+    """Hand the touchdown to the flight controller (it detects ground contact and disarms), then
+    make sure the vehicle is disarmed. Returns True once landed."""
     if ctx.s.landed:
-        ctx.vehicle.send(Command())
         ctx.vehicle.disarm()
         return True
-    ctx.vehicle.send(Command(vz=-0.5 if ctx.s.z > 0.4 else -0.25))
+    ctx.vehicle.land()
     return False
 
 
