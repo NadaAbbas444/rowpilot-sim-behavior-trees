@@ -1,0 +1,88 @@
+"""Whole missions in the simulator, judged against ground truth."""
+
+import pytest
+
+from ghdrone.layout import GreenhouseLayout
+from ghdrone.mission import MissionContext, build_tree, tree_to_dict
+from ghdrone.runner import RunConfig, run_mission
+from ghdrone.sim import SimConfig, SimVehicle
+
+SMALL = GreenhouseLayout(n_lanes=3, row_length=15.0)
+
+
+def run(layout=SMALL, **sim):
+    return run_mission(RunConfig(layout=layout, sim=SimConfig(**sim)))
+
+
+def statuses(result, node):
+    return [e["status"] for e in result.events if e["type"] == "status" and e["node"] == node]
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_nominal_mission_sweeps_every_lane_and_lands(seed):
+    r = run(seed=seed)
+    assert r.outcome == "completed"
+    assert r.lanes_completed == [0, 1, 2]
+    assert r.max_lane_error_m < 0.45  # 0.8 m half-lane minus the drone radius is 0.55 m
+    assert max(r.lane_rms_error_m.values()) < 0.2
+    assert statuses(r, "Land")[-1] == "SUCCESS"
+
+
+def test_full_greenhouse_on_one_battery():
+    r = run(layout=GreenhouseLayout())
+    assert r.outcome == "completed", r.outcome
+    assert r.lanes_completed == list(range(6))
+    assert r.battery_end_pct > 20
+
+
+@pytest.mark.parametrize("seed", [3, 4])
+def test_strong_gusts_still_safe(seed):
+    r = run(seed=seed, wind_sigma=0.8, wind_tau_s=0.8)
+    assert r.outcome != "crashed"
+    assert r.max_lane_error_m < 0.55
+
+
+def test_low_battery_returns_home_and_lands():
+    r = run(layout=GreenhouseLayout(), start_battery_pct=60)
+    assert r.outcome == "aborted: battery low"
+    assert 0 < len(r.lanes_completed) < 6
+    assert r.trace[-1]["z"] < 0.05
+    hx, hy = GreenhouseLayout().home
+    assert abs(r.trace[-1]["x"] - hx) < 0.6 and abs(r.trace[-1]["y"] - hy) < 0.6
+
+
+def test_short_vo_dropout_hovers_then_resumes():
+    r = run(vo_dropouts=[(25.0, 1.5)])
+    assert r.outcome == "completed"
+    assert "RUNNING" in statuses(r, "Hover")
+    # The interrupted mission resumed where it was instead of starting over.
+    assert statuses(r, "Takeoff").count("SUCCESS") >= 1
+    assert sum(1 for e in r.events if e["type"] == "log" and e["node"] == "Takeoff" and "done" in e["msg"]) == 1
+
+
+def test_long_vo_dropout_lands_in_place():
+    r = run(vo_dropouts=[(25.0, 30.0)])
+    assert r.outcome == "aborted: visual odometry lost"
+    assert "SUCCESS" in statuses(r, "LandHere")
+    assert r.duration_s < 25.0 + 3.0 + 10.0  # waited out the glitch window, then came straight down
+
+
+def test_refuses_to_start_on_low_battery():
+    r = run(start_battery_pct=30)
+    assert r.outcome.startswith("aborted")
+    assert max(t["z"] for t in r.trace) == 0.0
+
+
+def test_tree_export_for_editor():
+    ctx = MissionContext(SimVehicle(SMALL), SMALL)
+    d = tree_to_dict(build_tree(ctx))
+    names = {n["name"] for n in d["nodes"]}
+    assert {"SafetyGuard", "Mission", "Lane 3: Sweep", "Failsafe: ReturnHome"} <= names
+    assert len(d["edges"]) == len(d["nodes"]) - 1  # a tree
+
+
+def test_events_stream_live():
+    seen = []
+    run_mission(RunConfig(layout=GreenhouseLayout(n_lanes=1, row_length=8.0)), on_event=seen.append)
+    assert {"status", "log"} <= {e["type"] for e in seen}
+    assert seen[-1] == {"t": seen[-1]["t"], "type": "end", "node": "Root", "msg": "completed"}
