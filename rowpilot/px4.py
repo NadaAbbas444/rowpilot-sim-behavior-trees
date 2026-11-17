@@ -178,6 +178,15 @@ class Px4Vehicle:
         return self.feeds.latest_scan()
 
 
+def _stop(veh: Px4Vehicle) -> str:
+    """Ctrl+C: ask PX4 to land in place. If PX4 is already shutting down, just report it."""
+    try:
+        veh.land()
+        return "stopped by user (PX4 landing in place)"
+    except Exception as e:  # noqa: BLE001 - any MAVSDK failure here only changes the message
+        return f"stopped by user (land request failed: {e})"
+
+
 def run_px4(
     layout: GreenhouseLayout,
     params: MissionParams,
@@ -207,8 +216,12 @@ def run_px4(
     outcome, hit_crop = "timeout", False
     next_tick = time.monotonic()
     while True:
-        ctx.pre_tick()
-        root.tick_once()
+        try:
+            ctx.pre_tick()
+            root.tick_once()
+        except KeyboardInterrupt:  # Ctrl+C: let PX4 land where it is, keep what was recorded
+            outcome = _stop(veh)
+            break
         for node in root.iterate():
             if last.get(node.name) != node.status:
                 last[node.name] = node.status
@@ -228,7 +241,11 @@ def run_px4(
         if s.t > max_time_s:
             break
         next_tick += 1.0 / tick_hz
-        time.sleep(max(0.0, next_tick - time.monotonic()))
+        try:
+            time.sleep(max(0.0, next_tick - time.monotonic()))
+        except KeyboardInterrupt:
+            outcome = _stop(veh)
+            break
 
     if hit_crop and outcome == "completed":
         outcome = "completed (touched crop)"
