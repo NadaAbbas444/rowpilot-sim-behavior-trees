@@ -11,11 +11,14 @@ OUT=$REPO/runs/px4-$(date +%Y%m%d-%H%M%S)
 POSE=$("$REPO/.venv-sim/bin/python" -c "from rowpilot.gazebo_world import spawn_pose; from rowpilot.layout import GreenhouseLayout; print(spawn_pose(GreenhouseLayout()))")
 mkdir -p "$OUT"
 
-PATTERN="px4_sitl_default/bin/px4|gz sim"
+# PX4 runs as a process named "px4"; Gazebo as "gz sim ...".
+running() { pgrep -x px4 > /dev/null || pgrep -f "gz sim" > /dev/null; }
 cleanup() {  # stop PX4 and Gazebo, and wait until they are really gone
-  pkill -f "$PATTERN" || true
-  for _ in $(seq 1 20); do pgrep -f "$PATTERN" > /dev/null || return 0; sleep 0.5; done
-  pkill -9 -f "$PATTERN" || true
+  pkill -x px4 || true
+  pkill -f "gz sim" || true
+  for _ in $(seq 1 20); do running || return 0; sleep 0.5; done
+  pkill -9 -x px4 || true
+  pkill -9 -f "gz sim" || true
 }
 trap cleanup EXIT
 cleanup
@@ -25,7 +28,8 @@ echo "Starting PX4 + Gazebo (log: $OUT/px4.log) ..."
   PX4_SYS_AUTOSTART=4099 PX4_GZ_WORLD=greenhouse PX4_GZ_MODEL_POSE="$POSE" ./bin/px4 -d > "$OUT/px4.log" 2>&1 &)
 for i in $(seq 1 120); do
   grep -q "Ready for takeoff" "$OUT/px4.log" 2>/dev/null && break
-  if grep -q "Startup script returned with return value" "$OUT/px4.log" 2>/dev/null || [ "$i" = 120 ]; then
+  if grep -q -E "Startup script returned with return value|server already running" "$OUT/px4.log" 2>/dev/null ||
+     [ "$i" = 120 ]; then
     echo "PX4 did not start, see $OUT/px4.log:" >&2; tail -5 "$OUT/px4.log" >&2; exit 1
   fi
   sleep 1
