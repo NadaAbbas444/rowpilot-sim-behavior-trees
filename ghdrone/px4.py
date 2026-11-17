@@ -147,7 +147,7 @@ def run_px4(
     params: MissionParams,
     url: str = "udpin://0.0.0.0:14540",
     world: str = "greenhouse",
-    model: str = "x500_greenhouse_0",
+    model: str = "gh_x500_0",
     max_time_s: float = 900.0,
     out: Path | None = None,
     tick_hz: float = 10.0,

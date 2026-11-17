@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     x = sub.choices["px4"]
     x.add_argument("--url", default="udpin://0.0.0.0:14540", help="MAVLink connection to PX4")
     x.add_argument("--world", default="greenhouse")
-    x.add_argument("--model", default="x500_greenhouse_0")
+    x.add_argument("--model", default="gh_x500_0")
     x.add_argument("--max-time", type=float, default=900.0)
     x.add_argument("--out", type=Path)
     a = p.parse_args(argv)
