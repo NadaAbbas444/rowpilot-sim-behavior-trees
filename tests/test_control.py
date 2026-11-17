@@ -2,8 +2,8 @@ import math
 
 import pytest
 
-from ghdrone.control import LaneFollower, goto_command, wrap_angle
-from ghdrone.perception import LaneEstimate
+from rowpilot.control import LaneFollower, goto_command, wrap_angle
+from rowpilot.perception import LaneEstimate
 
 
 def test_wrap_angle():

@@ -2,10 +2,10 @@
 
 import pytest
 
-from ghdrone.layout import GreenhouseLayout
-from ghdrone.mission import MissionContext, build_tree, tree_to_dict
-from ghdrone.runner import RunConfig, run_mission
-from ghdrone.sim import SimConfig, SimVehicle
+from rowpilot.layout import GreenhouseLayout
+from rowpilot.mission import MissionContext, build_tree, tree_to_dict
+from rowpilot.runner import RunConfig, run_mission
+from rowpilot.sim import SimConfig, SimVehicle
 
 SMALL = GreenhouseLayout(n_lanes=3, row_length=15.0)
 

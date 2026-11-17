@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ghdrone"
+name = "rowpilot"
 version = "0.1.0"
-description = "Greenhouse lane-sweeping drone: lane perception, lane following and a behaviour-tree mission, with a lightweight simulator."
+description = "GPS-free greenhouse drone: behaviour-tree mission, lane-centric visual odometry, PX4 SITL + Gazebo."
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Nada Fahim" }]
@@ -16,10 +16,10 @@ plot = ["matplotlib>=3.6"]
 dev = ["pytest>=7", "ruff>=0.5", "matplotlib>=3.6"]
 
 [project.scripts]
-ghdrone = "ghdrone.cli:main"
+rowpilot = "rowpilot.cli:main"
 
 [tool.setuptools]
-packages = ["ghdrone"]
+packages = ["rowpilot"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

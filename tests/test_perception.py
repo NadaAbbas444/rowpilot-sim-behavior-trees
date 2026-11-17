@@ -3,9 +3,9 @@ import math
 import numpy as np
 import pytest
 
-from ghdrone.layout import GreenhouseLayout
-from ghdrone.perception import estimate_lane
-from ghdrone.sim import SimConfig, SimVehicle
+from rowpilot.layout import GreenhouseLayout
+from rowpilot.perception import estimate_lane
+from rowpilot.sim import SimConfig, SimVehicle
 
 LAY = GreenhouseLayout()
 

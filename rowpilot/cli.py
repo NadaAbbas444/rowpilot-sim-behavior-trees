@@ -1,9 +1,9 @@
 """Command line: run a mission, print the tree.
 
-python -m ghdrone run --out runs/nominal
-python -m ghdrone run --battery 60 --out runs/low-battery
-python -m ghdrone run --vo-dropout 30:1.5 --vo-dropout 120:10 --out runs/vo
-python -m ghdrone tree
+python -m rowpilot run --out runs/nominal
+python -m rowpilot run --battery 60 --out runs/low-battery
+python -m rowpilot run --vo-dropout 30:1.5 --vo-dropout 120:10 --out runs/vo
+python -m rowpilot tree
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _layout(a) -> GreenhouseLayout:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
-        prog="ghdrone", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        prog="rowpilot", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("run", "tree", "world", "px4"):

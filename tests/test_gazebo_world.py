@@ -2,8 +2,8 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from ghdrone.gazebo_world import make_world, spawn_pose
-from ghdrone.layout import GreenhouseLayout
+from rowpilot.gazebo_world import make_world, spawn_pose
+from rowpilot.layout import GreenhouseLayout
 
 TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 <sdf version="1.9">
