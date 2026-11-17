@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "rowpilot"
 version = "0.1.0"
 description = "GPS-free greenhouse drone: behaviour-tree mission, lane-centric visual odometry, PX4 SITL + Gazebo."
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Nada Fahim" }]
 dependencies = ["numpy>=1.24", "py_trees>=2.2"]
 

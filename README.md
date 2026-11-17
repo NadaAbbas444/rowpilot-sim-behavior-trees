@@ -19,7 +19,8 @@ The core of this repo is the part that does not depend on a simulator or the har
 ## Run it
 
 ```bash
-pip install -e ".[dev]"
+python3 -m venv .venv && source .venv/bin/activate   # Ubuntu: sudo apt install python3-venv if missing
+pip install -U pip && pip install -e ".[dev]"
 python -m rowpilot tree                                    # print the behaviour tree
 python -m rowpilot run --out runs/nominal                  # full 6-lane greenhouse
 python -m rowpilot run --battery 60 --out runs/low-battery # returns home on the reserve
