@@ -150,12 +150,11 @@ class Px4Vehicle:
                     self.send(Command())
                     time.sleep(0.05)
                 self.offboard.start()
+                # arm() returns only when PX4 acknowledged the command, so this is the authoritative
+                # answer. Do not wait for telemetry to show it: when the simulator runs slower than
+                # real time (e.g. with the Gazebo window open), telemetry can lag by seconds.
                 self.action.arm()
-                for _ in range(30):  # telemetry reports the armed state a moment after the command
-                    if self.tel.armed():
-                        return True
-                    time.sleep(0.1)
-                return False
+                return True
             except (ActionError, OffboardError) as e:  # e.g. estimator still settling after boot
                 if time.monotonic() > end:
                     print(f"arming refused: {e}", flush=True)
