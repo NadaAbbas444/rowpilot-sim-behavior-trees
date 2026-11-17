@@ -4,6 +4,7 @@
 #   ./scripts/setup_px4_sim.sh            (PX4 goes to ~/PX4-Autopilot)
 #   ./scripts/setup_px4_sim.sh /some/dir  (PX4 goes to /some/dir/PX4-Autopilot)
 set -euo pipefail
+export PYTHONNOUSERSITE=1  # keep ~/.local packages (e.g. a newer protobuf) out of the simulator environment
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 PX4=${1:-$HOME}/PX4-Autopilot
 

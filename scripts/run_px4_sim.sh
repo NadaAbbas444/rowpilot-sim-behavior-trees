@@ -2,6 +2,9 @@
 # Start PX4 SITL with the Gazebo window, then fly the rowpilot behaviour tree through the greenhouse.
 #   ./scripts/run_px4_sim.sh [path/to/PX4-Autopilot]    add HEADLESS=1 in front to run without the window
 set -euo pipefail
+# Ignore packages installed with "pip install --user" (~/.local): a newer protobuf there breaks
+# Gazebo's Python bindings, which need the protobuf version that came with them from apt.
+export PYTHONNOUSERSITE=1
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 PX4=${1:-$HOME/PX4-Autopilot}
 OUT=$REPO/runs/px4-$(date +%Y%m%d-%H%M%S)

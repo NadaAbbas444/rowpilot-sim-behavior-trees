@@ -39,9 +39,18 @@ class GazeboFeeds:
     """Latest forward scan and true pose from Gazebo (truth is for scoring only, never for flying)."""
 
     def __init__(self, world: str, model: str):
-        from gz.msgs10.laserscan_pb2 import LaserScan
-        from gz.msgs10.pose_v_pb2 import Pose_V
-        from gz.transport13 import Node
+        try:
+            from gz.msgs10.laserscan_pb2 import LaserScan
+            from gz.msgs10.pose_v_pb2 import Pose_V
+            from gz.transport13 import Node
+        except TypeError as e:  # "Descriptors cannot be created directly"
+            import google.protobuf
+
+            raise RuntimeError(
+                f"Gazebo's Python bindings do not work with protobuf {google.protobuf.__version__} "
+                f"from {google.protobuf.__file__}. They need the protobuf that came with them from apt. "
+                "If that path is under ~/.local, run with PYTHONNOUSERSITE=1 (scripts/run_px4_sim.sh does this)."
+            ) from e
 
         self.model = model
         self.scan = np.empty((0, 2))
