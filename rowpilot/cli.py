@@ -55,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--template", type=Path, required=True, help="PX4 Tools/simulation/gz/worlds/default.sdf")
     w.add_argument("--out", type=Path, required=True)
     w.add_argument("--assets-dir", type=Path, help="Gazebo model folder for plant meshes; omit for plain boxes")
+    w.add_argument("--vehicle", help="model URI to place at home, e.g. model://gh_iris (ArduPilot)")
     x = sub.choices["px4"]
     x.add_argument("--url", default="udpin://0.0.0.0:14540", help="MAVLink connection to PX4")
     x.add_argument("--world", default="greenhouse")
@@ -67,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "world":
         from .gazebo_world import spawn_pose, write_world
 
-        write_world(layout, a.template, a.out, assets_dir=a.assets_dir)
+        write_world(layout, a.template, a.out, assets_dir=a.assets_dir, vehicle=a.vehicle)
         print(f"wrote {a.out}; spawn with PX4_GZ_MODEL_POSE={spawn_pose(layout)}")
         return 0
 

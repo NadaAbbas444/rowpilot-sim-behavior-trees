@@ -1,0 +1,23 @@
+# rowpilot: ArduCopter in a GPS-denied greenhouse. Position, velocity, height and yaw come from
+# OpenVINS (D435i) as MAVLink ODOMETRY; no GPS, no compass. Loaded after ArduPilot's
+# copter.parm and gazebo-iris.parm defaults.
+AHRS_EKF_TYPE 3
+EK2_ENABLE 0
+EK3_ENABLE 1
+EK3_SRC1_POSXY 6
+EK3_SRC1_VELXY 6
+EK3_SRC1_POSZ 6
+EK3_SRC1_VELZ 6
+EK3_SRC1_YAW 6
+VISO_TYPE 1
+GPS1_TYPE 0
+SIM_GPS1_ENABLE 0
+COMPASS_USE 0
+COMPASS_USE2 0
+COMPASS_USE3 0
+COMPASS_ENABLE 0
+FS_GCS_ENABLE 0
+# simulated battery: 5 Ah pack
+BATT_MONITOR 4
+BATT_CAPACITY 5000
+SIM_BATT_CAP_AH 5

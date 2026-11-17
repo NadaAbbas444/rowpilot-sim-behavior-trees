@@ -130,13 +130,22 @@ def make_world(
     world_name: str = "greenhouse",
     plants: list[str] | None = None,
     seed: int = 0,
+    vehicle: str | None = None,
 ) -> str:
-    """Insert the greenhouse into a PX4 world SDF and rename the world."""
+    """Insert the greenhouse into a world SDF and rename the world. With vehicle (a model URI, e.g.
+    model://gh_iris for ArduPilot), the drone is placed at home; PX4 spawns its own instead."""
     sdf, n = re.subn(r'<world name="[^"]*">', f'<world name="{world_name}">', template_sdf, count=1)
     if n != 1 or "</world>" not in sdf:
         raise ValueError("template is not a single-world SDF file")
     head, tail = sdf.rsplit("</world>", 1)
     content = crop_rows(layout, plants, seed) + infrastructure(layout, textured_floor=bool(plants))
+    if vehicle:
+        hx, hy = layout.home
+        name = vehicle.rsplit("/", 1)[-1]
+        content += (
+            f"\n    <include>\n      <uri>{vehicle}</uri>\n      <name>{name}</name>\n"
+            f"      <pose>{hx:.3f} {hy:.3f} 0.2 0 0 0</pose>\n    </include>"
+        )
     return f"{head}{content}\n  </world>{tail}"
 
 
@@ -153,6 +162,7 @@ def write_world(
     world_name: str = "greenhouse",
     assets_dir: Path | None = None,
     seed: int = 0,
+    vehicle: str | None = None,
 ) -> Path:
     """Write the world. With assets_dir (a Gazebo model folder, e.g. <PX4>/Tools/simulation/gz/models/
     greenhouse_assets), plant meshes and the floor texture are generated there and used."""
@@ -161,5 +171,7 @@ def write_world(
         from .greenhouse_assets import write_plant_model
 
         plants = write_plant_model(assets_dir, height=layout.canopy_height, seed=seed)
-    out_path.write_text(make_world(layout, template_path.read_text(encoding="utf-8-sig"), world_name, plants, seed))
+    out_path.write_text(
+        make_world(layout, template_path.read_text(encoding="utf-8-sig"), world_name, plants, seed, vehicle)
+    )
     return out_path
