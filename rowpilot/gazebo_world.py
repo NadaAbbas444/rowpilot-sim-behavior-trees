@@ -27,6 +27,7 @@ PLANT_SPACING_M = 0.25  # about 2 stems per m2 with a 2 m row pitch
 PIPE_OFFSET_M = 0.275  # each pipe rail is this far from the lane centre (55 cm rail gauge)
 PIPE_RADIUS_M = 0.0255  # 51 mm heating pipe
 TAPE_HEIGHT_M = 2.8
+ACROSS_ROW_SQUEEZE = 0.42  # leaves trained along the row: they reach ~14 cm into the lane, as in sim.py
 
 
 def _static(name: str, body: str, pose=(0, 0, 0, 0, 0, 0)) -> str:
@@ -75,7 +76,7 @@ def crop_rows(layout: GreenhouseLayout, plants: list[str] | None, seed: int = 0)
                 body += (
                     f'        <visual name="plant_{i}"><pose>{x:.3f} {y:.3f} 0 0 0 {yaw:.3f}</pose>'
                     f"<geometry><mesh><uri>{ASSETS}/{mesh}</uri>"
-                    f"<scale>{s:.3f} {0.55 * s:.3f} {s:.3f}</scale></mesh></geometry></visual>\n"
+                    f"<scale>{s:.3f} {ACROSS_ROW_SQUEEZE * s:.3f} {s:.3f}</scale></mesh></geometry></visual>\n"
                 )
         body += "      </link>\n"
         out.append(_static(f"crop_row_{k}", body, (0, c, 0, 0, 0, 0)))

@@ -182,3 +182,41 @@ def _nearest_cluster(d: np.ndarray, min_points: int) -> np.ndarray | None:
             band = m & (d >= lo) & (d <= lo + FACE_BAND_M)
             return band if band.sum() >= min_points else None
     return None
+
+
+class LaneFilter:
+    """Smooths lane estimates over time (first-order low-pass, time constant per quantity; 0 = off).
+
+    In leafy rows single frames are noisy, worst for the heading (a patch of thick leaves at one end
+    makes the row look tilted), so the heading is smoothed. The offset is not by default: measured in
+    gusts, the delay of smoothing it costs more than the leaf noise it removes. A gap of more than
+    max_gap_s without valid estimates (e.g. a turn in the headland) restarts the filter."""
+
+    def __init__(self, tau_offset_s: float = 0.0, tau_heading_s: float = 0.5, max_gap_s: float = 1.0):
+        self.tau_o, self.tau_h, self.max_gap = tau_offset_s, tau_heading_s, max_gap_s
+        self.state: LaneEstimate | None = None
+        self.last_valid_t: float | None = None
+
+    def update(self, est: LaneEstimate, t: float) -> LaneEstimate:
+        if not est.valid:
+            # Pass "no estimate" through: steering on a stale estimate is worse than the fallback
+            # (holding the lane on visual odometry). The state is kept to resume smoothly.
+            if self.last_valid_t is not None and t - self.last_valid_t > self.max_gap:
+                self.state = None
+            return est
+        if self.state is None or self.last_valid_t is None or t - self.last_valid_t > self.max_gap:
+            self.state = est
+        else:
+            dt = t - self.last_valid_t
+            ao = 1 - math.exp(-dt / self.tau_o) if self.tau_o > 0 else 1.0
+            ah = 1 - math.exp(-dt / self.tau_h) if self.tau_h > 0 else 1.0
+            s = self.state
+            self.state = LaneEstimate(
+                s.lateral_offset + ao * (est.lateral_offset - s.lateral_offset),
+                s.heading_error + ah * (est.heading_error - s.heading_error),
+                est.n_left,
+                est.n_right,
+                True,
+            )
+        self.last_valid_t = t
+        return self.state

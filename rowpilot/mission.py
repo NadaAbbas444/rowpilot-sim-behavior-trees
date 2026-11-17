@@ -31,7 +31,7 @@ from py_trees.common import Status
 
 from .control import Command, LaneFollower, altitude_hold, goto_command
 from .layout import GreenhouseLayout
-from .perception import LaneEstimate, estimate_lane
+from .perception import LaneEstimate, LaneFilter, estimate_lane
 from .vehicle import Vehicle, VehicleState
 
 
@@ -60,7 +60,8 @@ class MissionContext:
     abort_reason: str | None = None
     vo_lost_since: float | None = None
     y_bias: float = 0.0  # lane-centric localization: correction added to the VO y estimate
-    lane: LaneEstimate = field(default_factory=LaneEstimate)
+    lane: LaneEstimate = field(default_factory=LaneEstimate)  # filtered over time
+    lane_filter: LaneFilter = field(default_factory=LaneFilter)
     lanes_completed: list[int] = field(default_factory=list)
     s: VehicleState | None = None
 
@@ -74,7 +75,7 @@ class MissionContext:
             self.vo_lost_since = None
         elif self.vo_lost_since is None:
             self.vo_lost_since = raw.t
-        self.lane = estimate_lane(self.vehicle.depth_scan(), self.layout.path_width)
+        self.lane = self.lane_filter.update(estimate_lane(self.vehicle.depth_scan(), self.layout.path_width), raw.t)
         self._lane_fix()
 
     def _lane_fix(self) -> None:
