@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rowpilot"
 version = "0.1.0"
-description = "GPS-free greenhouse drone: behaviour-tree mission, lane-centric visual odometry, PX4 SITL + Gazebo."
+description = "Drone for GPS-denied greenhouses: behaviour-tree mission, lane perception, visual-inertial odometry (OpenVINS), SITL + Gazebo."
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]

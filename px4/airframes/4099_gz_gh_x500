@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# @name Gazebo x500 greenhouse (vision odometry, forward lidar, no GPS)
+# @name Gazebo x500 greenhouse (GPS-denied: visual-inertial odometry, D435i, Pi camera)
 #
 # @type Quadrotor
 #
@@ -9,7 +9,7 @@ PX4_SIM_MODEL=${PX4_SIM_MODEL:=gh_x500}
 
 . ${R}etc/init.d-posix/airframes/4001_gz_x500
 
-# Indoors: no GPS and no magnetometer; position, height and yaw come from external vision.
+# GPS-denied greenhouse: no GPS and no magnetometer; position, height and yaw come from external vision (VIO).
 param set-default SIM_GPS_USED 0
 param set-default SYS_HAS_GPS 0
 param set-default SYS_HAS_MAG 0

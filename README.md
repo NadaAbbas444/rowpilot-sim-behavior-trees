@@ -4,9 +4,9 @@
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776ab)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
-**A GPS-free greenhouse drone flown by a behaviour tree.**
+**A drone for GPS-denied greenhouses, flown by a behaviour tree.**
 
-A drone that flies the lanes between greenhouse crop rows without GPS. It localizes with visual odometry, keeps itself centred in each lane using the crop rows it sees in a depth camera, and runs the mission as a **behaviour tree** that handles a low battery and lost tracking safely.
+A drone that flies the lanes between greenhouse crop rows, where GPS is denied (glass, steel and dense crop). It localizes with visual odometry, keeps itself centred in each lane using the crop rows it sees in a depth camera, and runs the mission as a **behaviour tree** that handles a low battery and lost tracking safely.
 
 Target hardware: a flight controller running PX4, a Raspberry Pi 5 companion computer on SkiffOS, an Intel RealSense depth camera (lane perception and visual odometry), a Pi camera, and a battery.
 
@@ -74,7 +74,7 @@ The same behaviour tree flies the real PX4 flight stack in Gazebo, through a `Ve
 |---|---|
 | Greenhouse world generated from the same `GreenhouseLayout` | `rowpilot/gazebo_world.py` |
 | `gh_x500`: x500 with vision odometry and a forward horizontal lidar standing in for one row of the RealSense depth image (cropped to its 87° field of view) | `px4/models/gh_x500/` |
-| GPS-free, offboard-only airframe | `px4/airframes/4099_gz_gh_x500` |
+| Airframe for GPS-denied flight (no GPS, no compass, offboard only) | `px4/airframes/4099_gz_gh_x500` |
 | Copies the above into a PX4-Autopilot checkout | `px4/install.sh` |
 | `Px4Vehicle` (MAVSDK offboard velocity, PX4 Land mode for touchdown) and the live runner | `rowpilot/px4.py` |
 

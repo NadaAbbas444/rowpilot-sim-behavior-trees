@@ -131,8 +131,11 @@ int main(int argc, char **argv) {
       out.mutable_header()->mutable_stamp()->set_nsec(static_cast<int32_t>((p.first - std::floor(p.first)) * 1e9));
       auto *status = out.mutable_header()->add_data();
       status->set_key("status");
-      if (vio->initialized()) {
-        auto st = vio->get_state();
+      // OpenVINS's initialized() stays false until the first visual update, which zero-velocity
+      // updates postpone while the drone stands still. The state is valid from initialisation on
+      // (its timestamp is set then), and PX4/ArduPilot need the pose before take-off.
+      auto st = vio->get_state();
+      if (st->_timestamp > 0) {
         Eigen::Matrix3d R_ItoG = ov_core::quat_2_Rot(st->_imu->quat()).transpose();
         Eigen::Quaterniond q(R_ItoG);
         Eigen::Vector3d p_IinG = st->_imu->pos(), v_IinG = st->_imu->vel();
@@ -155,7 +158,7 @@ int main(int argc, char **argv) {
       if (p.first - last_report > 5.0) {
         last_report = p.first;
         std::cout << "[vio_bridge] t=" << p.first << " frames=" << frames
-                  << (vio->initialized() ? " initialized" : " waiting for initialisation") << std::endl;
+                  << (vio->get_state()->_timestamp > 0 ? " initialized" : " waiting for initialisation") << std::endl;
       }
     }
     if (pairs.empty()) std::this_thread::sleep_for(std::chrono::milliseconds(2));
