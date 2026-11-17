@@ -246,4 +246,13 @@ def run_px4(
         (out / "summary.json").write_text(json.dumps(summary, indent=1))
         (out / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
         (out / "trace.json").write_text(json.dumps(trace))
+        try:
+            from types import SimpleNamespace
+
+            from .plot import plot_run
+
+            scored = [r for r in trace if "x" in r]  # rows with Gazebo ground truth
+            plot_run(SimpleNamespace(trace=scored, **summary), layout, str(out / "path.png"))
+        except ImportError:
+            pass
     return summary

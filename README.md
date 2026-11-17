@@ -65,22 +65,39 @@ The guard is ticked before the mission on every tick, so a failing check interru
 - Perception matches the true offset and heading across positions and angles, including lane entries seen from the headland, and is never confidently wrong in hard poses.
 - Full missions against ground truth: every lane swept and landed; the whole 6-lane greenhouse on one battery; strong gusts without hitting the crop; return home on a low battery; hover and resume on a short VO dropout; land in place on a long one; refusing to take off on a low battery.
 
-## PX4 SITL + Gazebo (in progress)
+## PX4 SITL + Gazebo
 
-The same tree is meant to fly the real PX4 software stack in Gazebo, through a `Vehicle` implementation over MAVSDK:
+The same behaviour tree flies the real PX4 flight stack in Gazebo, through a `Vehicle` implementation over MAVSDK. No GPS and no magnetometer: PX4's EKF2 fuses only the vision odometry, as on the real drone.
 
 | Piece | File |
 |---|---|
 | Greenhouse world generated from the same `GreenhouseLayout` | `rowpilot/gazebo_world.py` |
-| `gh_x500`: x500 with vision odometry (no GPS) and a forward horizontal lidar standing in for one row of the RealSense depth image | `px4/models/gh_x500/` |
+| `gh_x500`: x500 with vision odometry and a forward horizontal lidar standing in for one row of the RealSense depth image (cropped to its 87° field of view) | `px4/models/gh_x500/` |
 | GPS-free, offboard-only airframe | `px4/airframes/4099_gz_gh_x500` |
 | Copies the above into a PX4-Autopilot checkout | `px4/install.sh` |
-| `Px4Vehicle` (MAVSDK offboard velocity) and the live runner | `rowpilot/px4.py` |
+| `Px4Vehicle` (MAVSDK offboard velocity, PX4 Land mode for touchdown) and the live runner | `rowpilot/px4.py` |
 
-Status: written, **not yet flown**. The next step is running it against PX4 SITL and fixing what that shows.
+**Result** (6 lanes, 40 m rows, scored against Gazebo ground truth): every lane swept, **5–8 mm RMS from the lane centre, 43 mm worst case**, home through the headland, and touchdown by PX4's Land mode.
+
+![PX4 SITL + Gazebo run: six lanes swept, back home and landed](docs/gazebo-px4-run.png)
+
+### Run it on your machine (Ubuntu 22.04 / 24.04)
+
+The scripts repeat the steps used to fly it headless on Ubuntu 24.04; the Gazebo window itself has not been tested yet.
+
+```bash
+./scripts/setup_px4_sim.sh      # once: PX4, Gazebo Harmonic, the greenhouse world and drone (20-40 min)
+./scripts/run_px4_sim.sh        # opens Gazebo and flies the mission; results in runs/px4-<time>/
+```
+
+Things learned getting PX4 to fly it, all handled in `rowpilot/px4.py`:
+- PX4 refuses to arm indoors in its default Hold mode (it needs a global position), so it switches to offboard first, then arms.
+- Without GPS, PX4 sends no global position, so MAVSDK's `heading()` is NaN; yaw comes from attitude.
+- PX4's local frame shares the Gazebo world origin, because the vision odometry is reported in world coordinates.
+- MAVSDK's local-position flag drops out for single messages, so it is debounced before the tree treats it as lost VO.
+- In offboard velocity mode PX4's land detector never confirms touchdown; landing is handed to PX4's Land mode.
 
 ## Next steps
 
-1. **Fly the tree in PX4 SITL + Gazebo** (see above).
-2. **Node editor**: React Flow frontend + FastAPI backend that runs the tree, streaming `on_event` over a WebSocket so each node lights up and shows its own log (`python -m rowpilot tree --json` already exports nodes and edges).
-3. **Hardware**: RealSense driver and visual odometry (e.g. OpenVINS or VINS-Fusion) on the Pi 5, feeding PX4's EKF2 as external vision; one row of the depth image as the lane scan.
+1. **Node editor**: React Flow frontend + FastAPI backend that runs the tree, streaming `on_event` over a WebSocket so each node lights up and shows its own log (`python -m rowpilot tree --json` already exports nodes and edges).
+2. **Hardware**: RealSense driver and visual odometry (e.g. OpenVINS or VINS-Fusion) on the Pi 5, feeding PX4's EKF2 as external vision; one row of the depth image as the lane scan.
