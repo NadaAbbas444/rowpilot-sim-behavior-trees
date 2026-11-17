@@ -8,6 +8,12 @@ export PYTHONNOUSERSITE=1
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 PX4=${1:-$HOME/PX4-Autopilot}
 OUT=$REPO/runs/px4-$(date +%Y%m%d-%H%M%S)
+# Repair the environment if a package is missing, e.g. when it was set up while ~/.local was
+# visible and pip skipped packages it found there.
+if ! "$REPO/.venv-sim/bin/python" -c "import numpy, py_trees, mavsdk, rowpilot" 2> /dev/null; then
+  echo "Installing missing Python packages into .venv-sim ..."
+  "$REPO/.venv-sim/bin/pip" install -q mavsdk -e "$REPO"
+fi
 POSE=$("$REPO/.venv-sim/bin/python" -c "from rowpilot.gazebo_world import spawn_pose; from rowpilot.layout import GreenhouseLayout; print(spawn_pose(GreenhouseLayout()))")
 mkdir -p "$OUT"
 
