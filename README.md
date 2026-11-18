@@ -6,9 +6,9 @@
 
 **A drone for GPS-denied greenhouses, flown by a behaviour tree.**
 
-A drone that flies the lanes between greenhouse crop rows, where GPS is denied (glass, steel and dense crop). It localizes with visual odometry, keeps itself centred in each lane using the crop rows it sees in a depth camera, and runs the mission as a **behaviour tree** that handles a low battery and lost tracking safely.
+A drone that flies the lanes between greenhouse crop rows, where GPS is denied (glass, steel and dense crop). The lanes are dead ends, as in the real greenhouse: the drone flies into each lane, turns round short of the end wall and flies back out the same way. It localizes with visual odometry, keeps itself centred in each lane using the crop rows it sees in a depth camera, and runs the mission as a **behaviour tree** that handles a low battery and lost tracking safely.
 
-Target hardware: a flight controller running ArduPilot (ArduCopter), a Raspberry Pi 5 companion computer on SkiffOS, an Intel RealSense D435i at the front tilted 15° down (depth for lane perception; stereo infrared + IMU for OpenVINS visual-inertial odometry), a Raspberry Pi Camera Module 3 on the left side for plant images, and a battery. No GPS, no compass.
+Target hardware: the FireFly 2 quadcopter (2004 motors, 4-inch props, 4S Molicel 21700 pack) with a flight controller running ArduPilot (ArduCopter), a Raspberry Pi 5 companion computer on SkiffOS, an Intel RealSense D435i at the front tilted 15° down (depth for lane perception; stereo infrared + IMU for OpenVINS visual-inertial odometry), a Raspberry Pi Camera Module 3 on the left side for plant images, and a battery. No GPS, no compass.
 
 The core of this repo is the part that does not depend on a simulator or the hardware: perception, control, the behaviour tree, and a lightweight simulator that sits behind the same `Vehicle` interface PX4 will use. It runs anywhere with Python 3.10+ and is covered by tests and CI.
 
@@ -34,12 +34,12 @@ Each run writes `events.jsonl` (every node's status changes and log lines), `tra
 
 | Piece | File | What it does |
 |---|---|---|
-| Layout | `rowpilot/layout.py` | Greenhouse geometry: lanes, crop rows, headlands, serpentine lane order, home |
+| Layout | `rowpilot/layout.py` | Greenhouse geometry: lanes, crop rows, headland, home. Lanes closed at the far end (default: in and back out of each lane) or open at both ends (`--open-ends`: serpentine) |
 | Lane perception | `rowpilot/perception.py` | Horizontal depth scan → distance from the lane centre and heading error. RANSAC line fit for each crop face, nearest face wins, both faces fitted together with a shared slope, sanity checks (parallel faces, correct lane width). Says "don't know" rather than guessing |
 | Control | `rowpilot/control.py` | Lane follower (PID on the sideways offset, P on heading, slows down when off-centre); waypoint path following with cross-track correction |
 | Mission | `rowpilot/mission.py` | The behaviour tree (py_trees), plus lane-centric localization: inside a lane, the perceived offset corrects the VO cross-track drift |
 | Vehicle interface | `rowpilot/vehicle.py` | `state()`, `arm()`, `disarm()`, `send(velocity)`, `depth_scan()`, which is all the mission needs |
-| Simulator | `rowpilot/sim.py` | Velocity-loop lag, gusts, drifting VO with dropouts, battery drain, RealSense-like depth rays hitting the crop faces and row ends. Keeps ground truth for tests |
+| Simulator | `rowpilot/sim.py` | Velocity-loop lag, gusts, drifting VO with dropouts, battery drain, RealSense-like depth rays hitting the crop faces, row ends and the end wall. Keeps ground truth for tests |
 | Runner | `rowpilot/runner.py` | Ticks the tree at 10 Hz and records per-node events (`on_event` streams them live) |
 
 ### The behaviour tree
@@ -54,7 +54,8 @@ Root (Sequence, re-evaluated every tick)
 │       └── ReturnAndLand: Airborne → ReturnHome → Land   low battery / a mission step failed
 └── Mission (Sequence)
     ├── Preflight, Takeoff
-    ├── Lane 1: GoToEntry → Align → Sweep → Exit
+    ├── Lane 1: GoToEntry → Align → Sweep in → TurnAround → Sweep out → Exit
+    │           (open lanes: GoToEntry → Align → Sweep → Exit)
     ├── … one subtree per lane
     └── ReturnHome, Land
 ```
@@ -64,7 +65,7 @@ The guard is ticked before the mission on every tick, so a failing check interru
 ### What the tests check
 
 - Perception matches the true offset and heading across positions and angles, including lane entries seen from the headland, and is never confidently wrong in hard poses.
-- Full missions against ground truth: every lane swept and landed; the whole 6-lane greenhouse on one battery; strong gusts (0.5 m/s rms, with the flight controller's measured delay) without hitting the crop; return home on a low battery; hover and resume on a short VO dropout; land in place on a long one; refusing to take off on a low battery.
+- Full missions against ground truth: every lane swept and landed; dead-end lanes flown in and back out without nearing the end wall, open lanes still serpentine; the whole 6-lane greenhouse on one battery; strong gusts (0.5 m/s rms, with the flight controller's measured delay) without hitting the crop; return home on a low battery; hover and resume on a short VO dropout; land in place on a long one; refusing to take off on a low battery.
 
 ## ArduPilot SITL + Gazebo (the real drone's setup)
 
@@ -73,23 +74,32 @@ Gazebo D435i → OpenVINS (no ROS) → MAVLink ODOMETRY → ArduPilot EKF3 (Exte
 
 | Piece | File |
 |---|---|
-| `gh_iris`: ArduPilot Iris + RealSense D435i (front, 15° down) + Pi Camera Module 3 (left), generated from one sensor description | `rowpilot/sensors.py` |
+| `gh_firefly`: the FireFly 2 from its SolidWorks design (body and props, rotor positions, sensor positions) + RealSense D435i (front, 15° down) + Pi Camera Module 3 (left) | `rowpilot/airframe.py`, `rowpilot/sensors.py` |
+| FireFly 2 meshes, simplified from the SolidWorks export (620k → 27k triangles): `python -m rowpilot.cad_import <export> ardupilot/firefly/meshes` | `rowpilot/cad_import.py`, `ardupilot/firefly/meshes/` |
+| `gh_iris`: ArduPilot Iris with the same sensors (`VEHICLE=iris`) | `rowpilot/sensors.py` |
 | Greenhouse world: tomato rows, pipe rails, posts, sticky tape, ground cover, glass facades | `rowpilot/gazebo_world.py`, `rowpilot/greenhouse_assets.py` |
 | OpenVINS config for the D435i | `rowpilot/openvins_config.py` |
 | VIO bridge: D435i stereo IR + IMU → OpenVINS → odometry | `vio_bridge/` |
 | OpenVINS pose → greenhouse frame | `rowpilot/vio_link.py` |
 | D435i accelerometer computed from the physics (simulation only, see below) | `rowpilot/imu_synth.py` |
 | `ArduPilotVehicle` (MAVLink: ODOMETRY to EKF3, GUIDED take-off and velocity targets, LAND mode) | `rowpilot/ardupilot.py` |
-| ArduCopter parameters for GPS-denied flight | `ardupilot/gh_iris.parm` |
+| ArduCopter parameters for GPS-denied flight, and the FireFly's frame, battery and rate gains | `ardupilot/gps_denied.parm`, `ardupilot/firefly.parm` |
 
 ```bash
 ./scripts/setup_ardupilot_sim.sh                                 # once: ArduPilot SITL, ardupilot_gazebo, OpenVINS, the bridge, .venv-sim
-./scripts/run_ardupilot_sim.sh ~/ardupilot ~/ardupilot_gazebo    # opens Gazebo and flies; results in runs/ardupilot-<time>/
+./scripts/run_ardupilot_sim.sh ~/ardupilot ~/ardupilot_gazebo    # opens Gazebo and flies the FireFly; results in runs/ardupilot-<time>/
+VEHICLE=iris ./scripts/run_ardupilot_sim.sh ~/ardupilot ~/ardupilot_gazebo   # the ArduPilot Iris instead
 ```
 
-**Result** (6 lanes, 13.3 m rows, OpenVINS → EKF3, scored against Gazebo ground truth): every lane swept, **48–112 mm RMS from the lane centre, 0.31 m worst case**, home through the headland, landed by ArduCopter's LAND mode, 239 s. OpenVINS + EKF3 position error in flight: 0.20 m mean, 0.54 m worst.
+**Result, FireFly 2** (6 dead-end lanes, 13.3 m rows, OpenVINS → EKF3, scored against Gazebo ground truth): every lane flown in to 1 m short of the end wall, turned round (~6 s) and flown back out, home through the headland, landed by ArduCopter's LAND mode. **37–93 mm RMS from the lane centre, 0.36 m worst case**, closest approach to the end wall 0.8 m, 378 s. OpenVINS + EKF3 position error: 0.15 m mean; its drift over the ~150 m flight puts the touchdown 0.9 m from the take-off spot.
 
-![ArduPilot SITL + OpenVINS in Gazebo: six lanes swept, back home and landed](docs/ardupilot-gazebo-run.png)
+![FireFly 2 in ArduPilot SITL + OpenVINS in Gazebo: six dead-end lanes, each flown in and back out, then home and landed](docs/firefly-gazebo-run.png)
+
+Earlier, with the Iris and open lanes (serpentine): every lane swept, 48–112 mm RMS from the lane centre, 0.31 m worst case, 239 s ([plot](docs/ardupilot-gazebo-run.png)).
+
+FireFly model: shape, rotor positions and sensor positions come from the SolidWorks design; mass (0.72 kg) and inertia are estimated from the CAD parts with typical component masses, and the thrust (7 N per motor) is typical for 2004 motors on 4-inch props. Both are estimates until the drone is weighed and the motors are known (see `rowpilot/airframe.py`).
+
+How the whole system works (processes and topics, the behaviour tree node by node, failsafes, perception, control, localization, what each run saves): **[docs/how-it-works.md](docs/how-it-works.md)**.
 
 Each run folder has `gazebo.log`, `arducopter.log`, `openvins.log`, `imu_synth.log`, `events.jsonl`, `trace.json` (estimate, ground truth, lane estimate and commands at 10 Hz), `summary.json` and `path.png`. `HEADLESS=1` runs without the Gazebo window; `GPU=0` keeps the default OpenGL renderer.
 
@@ -101,6 +111,8 @@ Things learned getting it to fly, all handled in the scripts and code:
 - **Gazebo's IMU accelerometer is wrong while the drone rotates** (0.2–0.6 m/s² sideways in yaw turns, while the gyro and the images agree with the true motion). OpenVINS integrated it into a false velocity and diverged in every turn. Gazebo's gyro is kept; the accelerometer is computed from the sensor link's physics pose (1 kHz), with BMI055-like noise and bias. With it, OpenVINS stays within 0.11 m of ground truth through 0.8 rad/s turns. This is a simulator fix only; the real D435i IMU goes straight to OpenVINS.
 - **Visual features.** The floor is tiled ground cover with dirt and leaf litter, and glass facades with columns and glazing bars close the greenhouse, so the cameras have something to track in the headlands. SDF's default metalness (0.5) renders a floor dark and featureless; it is set to 0.
 - **ZUPT only before take-off.** Hovering or creeping, the image barely changes and OpenVINS's zero-velocity test passes for a drone that is not standing still.
+- **The FireFly's rotors.** The rotor model is the Iris's (a joint spun at ArduPilot's commanded speed, two lift-drag blades), with the blade area set for the FireFly's thrust. The Iris's rotor inertia is blade-shaped (not symmetric about the spin axis): on a body this light, four of them spinning at 420 rad/s shook it at 17–20 m/s² and ArduCopter lost attitude control within a minute. FireFly rotors are discs, with a smaller inertia and a matching speed-loop gain.
+- **FireFly rate gains** (`ardupilot/firefly.parm`). On the long, light frame pitch and yaw respond about twice as strongly as on the Iris: with ArduCopter's default gains yaw oscillated at ±25°/s, the visual odometry drifted 3 m sideways in one lane, and the drone fell in its first turn. Pitch and yaw gains are halved. Roll, the lightest axis, limit-cycled at 20 Hz with the default D gain; 0.0015 removes it (roll-rate noise 107 → 9°/s). Tune these again on the real drone.
 - **The flight controller's response.** ArduCopter follows GUIDED velocity targets with ~0.5 s dead time and a 0.3 s lag (its jerk and acceleration limits). The Python simulator now models that, and the lane and waypoint controllers are tuned for it: the old gains made the drone swing across the lane. With this delay, the drone holds the lanes in gusts up to 0.5 m/s rms (20/20 runs); at 0.8 m/s most runs touch the crop.
 
 ## PX4 SITL + Gazebo
@@ -138,4 +150,5 @@ Things learned getting PX4 to fly it, all handled in `rowpilot/px4.py`:
 ## Next steps
 
 1. **Node editor**: React Flow frontend + FastAPI backend that runs the tree, streaming `on_event` over a WebSocket so each node lights up and shows its own log (`python -m rowpilot tree --json` already exports nodes and edges).
-2. **Hardware**: RealSense driver and visual odometry (e.g. OpenVINS or VINS-Fusion) on the Pi 5, feeding PX4's EKF2 as external vision; one row of the depth image as the lane scan.
+2. **Hardware**: RealSense driver and OpenVINS on the Pi 5, feeding ArduPilot's EKF3 as external navigation, as in the simulation; the depth image as the lane scan.
+3. **Measure the FireFly** and put the numbers in `rowpilot/airframe.py`: its weight (the model's 0.72 kg is an estimate from the CAD parts), motor KV and prop size and pitch (the model assumes ~7 N of thrust per motor), the D435i's tilt and the Pi Camera's side. The TF-Luna rangefinder in the CAD is not simulated yet.
