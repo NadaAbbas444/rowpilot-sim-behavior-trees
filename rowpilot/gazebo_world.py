@@ -5,8 +5,9 @@ pose in the mission's map frame.
 
 Each crop row is an invisible collision box (so a drone that drifts into the crop hits it) filled
 with procedural tomato plants (see greenhouse_assets.py). The lanes have the heating-pipe rails of a
-tomato greenhouse, the floor has a gritty concrete texture (visual odometry needs features to track),
-steel posts stand in the crop rows, and yellow sticky tape hangs above each row at 2.8 m.
+tomato greenhouse, the floor is ground cover with dirt and leaf litter (visual odometry needs features
+to track), steel posts stand in the crop rows, yellow sticky tape hangs above each row at 2.8 m, and
+glass facades with columns and glazing bars close the greenhouse.
 Without plant meshes (plants=None) the rows are plain green boxes, which is quicker to render.
 
 PX4 needs its own world plugins (physics, sensors, IMU, magnetometer, ...). Rather than copy them,
@@ -109,19 +110,90 @@ def infrastructure(layout: GreenhouseLayout, textured_floor: bool) -> str:
                 (L / 2, c, TAPE_HEIGHT_M, 0, 0, 0),
             )
         )
-    # Floor covering the greenhouse, slightly above PX4's ground plane to avoid z-fighting.
     x0, x1 = layout.home[0] - 2.0, L + layout.headland + 2.0
     y0, y1 = -layout.pitch - 1.0, layout.n_lanes * layout.pitch + 1.0
-    geo = f"<geometry><box><size>{x1 - x0:.3f} {y1 - y0:.3f} 0.002</size></box></geometry>"
+    out.append(floor(x0, x1, y0, y1, textured_floor))
+    out.append(walls(x0, x1, y0, y1))
+    return "".join(out)
+
+
+def floor(x0: float, x1: float, y0: float, y1: float, textured: bool) -> str:
+    """Floor covering the greenhouse, slightly above PX4's ground plane to avoid z-fighting.
+
+    Textured, it is tiled with the ground-cover texture (one texture per FLOOR_TILE_M tile, turned by
+    multiples of 90 deg so the pattern does not repeat in lines). Not metallic: SDF's default metalness
+    (0.5) renders it dark and low in contrast, with few features for the visual odometry."""
+    from .greenhouse_assets import FLOOR_TILE_M
+
+    if not textured:
+        geo = f"<geometry><box><size>{x1 - x0:.3f} {y1 - y0:.3f} 0.002</size></box></geometry>"
+        vis = f'        <visual name="visual">{geo}<material><diffuse>0.6 0.6 0.6 1</diffuse></material></visual>\n'
+        pose = ((x0 + x1) / 2, (y0 + y1) / 2, 0.001, 0, 0, 0)
+        return _static("floor", f'      <link name="link">\n{vis}      </link>\n', pose)
     mat = (
         f"<material><diffuse>1 1 1 1</diffuse><pbr><metal><albedo_map>{ASSETS}/floor.png</albedo_map>"
-        "<roughness>0.9</roughness></metal></pbr></material>"
-        if textured_floor
-        else "<material><diffuse>0.6 0.6 0.6 1</diffuse></material>"
+        "<roughness>0.9</roughness><metalness>0.0</metalness></metal></pbr></material>"
     )
-    body = f'      <link name="link">\n        <visual name="visual">{geo}{mat}</visual>\n      </link>\n'
-    out.append(_static("floor", body, ((x0 + x1) / 2, (y0 + y1) / 2, 0.001, 0, 0, 0)))
-    return "".join(out)
+    body = '      <link name="link">\n'
+    nx, ny = int(np.ceil((x1 - x0) / FLOOR_TILE_M)), int(np.ceil((y1 - y0) / FLOOR_TILE_M))
+    for i in range(nx):
+        for j in range(ny):
+            cx, cy = x0 + (i + 0.5) * FLOOR_TILE_M, y0 + (j + 0.5) * FLOOR_TILE_M
+            yaw = ((i * 3 + j * 5) % 4) * np.pi / 2
+            geo = f"<geometry><box><size>{FLOOR_TILE_M} {FLOOR_TILE_M} 0.002</size></box></geometry>"
+            pose = f"<pose>{cx:.3f} {cy:.3f} 0 0 0 {yaw:.4f}</pose>"
+            body += f'        <visual name="tile_{i}_{j}">{pose}{geo}{mat}</visual>\n'
+    return _static("floor", body + "      </link>\n", (0, 0, 0.001, 0, 0, 0))
+
+
+WALL_HEIGHT_M = 4.5
+WALL_POST_SPACING_M = 3.2  # facade columns
+GLAZING_BAR_SPACING_M = 0.8
+
+
+def walls(x0: float, x1: float, y0: float, y1: float) -> str:
+    """Glass facades around the floor: a concrete kerb, steel columns, girders and glazing bars over
+    light panes. In the headlands, where the drone turns, they are what the cameras see."""
+    body = '      <link name="link">\n'
+    n = 0
+
+    def box(size, pose, colour, collide=False):
+        nonlocal body, n
+        n += 1
+        s = " ".join(f"{v:.3f}" for v in size)
+        p = " ".join(f"{v:.3f}" for v in pose)
+        geo = f"<geometry><box><size>{s}</size></box></geometry>"
+        r, g, b = colour
+        mat = f"<material><ambient>{r} {g} {b} 1</ambient><diffuse>{r} {g} {b} 1</diffuse></material>"
+        if collide:
+            body += f'        <collision name="c{n}"><pose>{p}</pose>{geo}</collision>\n'
+        body += f'        <visual name="v{n}"><pose>{p}</pose>{geo}{mat}</visual>\n'
+
+    H = WALL_HEIGHT_M
+    sides = (  # (start, end) along the wall, and the fixed coordinate; along x or along y
+        ((x0, x1), y0, "x"),
+        ((x0, x1), y1, "x"),
+        ((y0, y1), x0, "y"),
+        ((y0, y1), x1, "y"),
+    )
+    for (a0, a1), c, axis in sides:
+        length, mid = a1 - a0, (a0 + a1) / 2
+
+        def at(u, z, _axis=axis, _c=c):
+            return (u, _c, z) if _axis == "x" else (_c, u, z)
+
+        def sized(along, across, height, _axis=axis):
+            return (along, across, height) if _axis == "x" else (across, along, height)
+
+        box(sized(length, 0.02, H), (*at(mid, H / 2), 0, 0, 0), (0.86, 0.88, 0.9), collide=True)  # panes
+        box(sized(length, 0.12, 0.6), (*at(mid, 0.3), 0, 0, 0), (0.55, 0.55, 0.53))  # concrete kerb
+        for z in (0.6, 2.4, H - 0.1):  # girders
+            box(sized(length, 0.1, 0.12), (*at(mid, z), 0, 0, 0), (0.3, 0.31, 0.33))
+        for u in np.arange(a0, a1 + 1e-6, GLAZING_BAR_SPACING_M):
+            box(sized(0.04, 0.05, H - 0.6), (*at(u, 0.6 + (H - 0.6) / 2), 0, 0, 0), (0.45, 0.46, 0.48))
+        for u in np.arange(a0, a1 + 1e-6, WALL_POST_SPACING_M):
+            box(sized(0.12, 0.14, H), (*at(u, H / 2), 0, 0, 0), (0.22, 0.23, 0.25))
+    return _static("walls", body + "      </link>\n")
 
 
 def make_world(

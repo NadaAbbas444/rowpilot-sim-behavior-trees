@@ -199,23 +199,33 @@ def tomato_plant_mesh(seed: int, height: float = 2.6) -> _Mesh:
     return mesh
 
 
-def floor_texture(path: Path, size_px: tuple[int, int] = (2048, 1536), seed: int = 0) -> Path:
-    """Concrete-and-grit floor: multi-scale noise plus speckles, so a camera finds features on it."""
-    from PIL import Image
+FLOOR_TILE_M = 4.0  # the floor texture covers one 4 m x 4 m tile; the world tiles the floor with it
+
+
+def floor_texture(path: Path, size_px: int = 2048, seed: int = 0) -> Path:
+    """Woven ground cover with dirt and leaf litter, for one FLOOR_TILE_M tile (2 mm per pixel).
+
+    Visual odometry tracks corners, so the cover gets sharp-edged spots from 1 to 15 cm: small ones
+    for close range, larger ones that still show at 3-5 m, when mipmapping has blurred the weave."""
+    from PIL import Image, ImageDraw, ImageFilter
 
     rng = np.random.default_rng(seed)
-    w, h = size_px
-    img = np.full((h, w), 150.0)
-    for scale, amp in ((256, 18), (64, 14), (16, 10), (4, 8)):
-        small = rng.normal(0, 1, (h // scale + 2, w // scale + 2))
-        big = np.kron(small, np.ones((scale, scale)))[:h, :w]
-        img += amp * big
-    img += rng.normal(0, 6, (h, w))
-    n = w * h // 400  # dark and light grit
-    ys, xs = rng.integers(0, h, n), rng.integers(0, w, n)
-    img[ys, xs] = rng.choice([60, 220], n)
-    img = np.clip(img, 0, 255).astype(np.uint8)
-    rgb = np.stack([img, (img * 0.98).astype(np.uint8), (img * 0.94).astype(np.uint8)], axis=-1)
+    n = size_px
+    px_per_m = n / FLOOR_TILE_M
+    base = 175 + 10 * np.sin(np.arange(n) * 2 * np.pi / 6)[None, :] * np.sin(np.arange(n) * 2 * np.pi / 6)[:, None]
+    small = rng.normal(0, 1, (n // 64, n // 64))
+    base += 12 * np.kron(small, np.ones((64, 64)))  # uneven wear and soiling
+    img = Image.fromarray(np.clip(base, 0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(20))
+    draw = ImageDraw.Draw(img)
+    for _ in range(2600):  # dirt and leaf litter: mostly dark, some light, sizes 1-15 cm
+        r = px_per_m * float(np.clip(rng.lognormal(np.log(0.025), 0.7), 0.01, 0.15)) / 2
+        x, y = rng.uniform(0, n, 2)
+        ax, ay = r * rng.uniform(0.5, 1.5), r * rng.uniform(0.5, 1.5)
+        shade = int(rng.choice([40, 70, 100, 230], p=[0.35, 0.3, 0.2, 0.15]))
+        draw.ellipse([x - ax, y - ay, x + ax, y + ay], fill=shade)
+    noise = rng.normal(0, 5, (n, n))
+    out = np.clip(np.asarray(img, float) + noise, 0, 255).astype(np.uint8)
+    rgb = np.stack([out, (out * 0.98).astype(np.uint8), (out * 0.94).astype(np.uint8)], axis=-1)
     Image.fromarray(rgb).save(path)
     return path
 
