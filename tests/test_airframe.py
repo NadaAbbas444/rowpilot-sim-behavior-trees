@@ -61,3 +61,14 @@ def test_simplify_keeps_the_shape(tmp_path):
     assert np.allclose(lo[:2], 0, atol=0.003) and np.allclose(hi[:2], s, atol=0.003)
     write_stl(tmp_path / "plate.stl", small)
     assert np.allclose(read_stl(tmp_path / "plate.stl"), small, atol=1e-6)
+
+
+def test_depth_view_colours_near_blue_far_red_and_missing_black():
+    from rowpilot.depth_view import colourise
+
+    d = np.array([[0.3, 6.0, np.inf, 0.0]], dtype=np.float32)
+    rgb = colourise(d)
+    assert rgb.shape == (1, 4, 3) and rgb.dtype == np.uint8
+    assert rgb[0, 0, 2] == 255 and rgb[0, 0, 0] == 0  # near: blue
+    assert rgb[0, 1, 0] == 255 and rgb[0, 1, 2] == 0  # far: red
+    assert (rgb[0, 2:] == 0).all()  # no depth: black

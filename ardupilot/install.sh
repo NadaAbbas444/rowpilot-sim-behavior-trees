@@ -7,6 +7,7 @@
 #   <out>/worlds/greenhouse.sdf     the greenhouse with the chosen drone at home
 #   <out>/openvins/                 OpenVINS config for the D435i
 #   <out>/*.parm                    ArduCopter parameters
+#   <out>/gui.config                the Gazebo window: 3D view and live camera screens
 # Usage: ardupilot/install.sh <out_dir> [python] [firefly|iris]
 set -euo pipefail
 OUT=${1:?output folder}
@@ -42,4 +43,5 @@ PY
 "$PY" -m rowpilot world --template "$HERE/world_template.sdf" --out "$OUT/worlds/greenhouse.sdf" \
   --assets-dir "$OUT/models/greenhouse_assets" --vehicle "model://gh_$VEHICLE"
 cp "$HERE/gps_denied.parm" "$HERE/firefly.parm" "$OUT/"
+sed "s/@MODEL@/gh_$VEHICLE/g" "$HERE/gui.config" > "$OUT/gui.config"
 echo "Installed into $OUT ($VEHICLE)"

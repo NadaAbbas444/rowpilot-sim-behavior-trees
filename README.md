@@ -99,7 +99,11 @@ Earlier, with the Iris and open lanes (serpentine): every lane swept, 48–112 m
 
 FireFly model: shape, rotor positions and sensor positions come from the SolidWorks design; mass (0.72 kg) and inertia are estimated from the CAD parts with typical component masses, and the thrust (7 N per motor) is typical for 2004 motors on 4-inch props. Both are estimates until the drone is weighed and the motors are known (see `rowpilot/airframe.py`).
 
-How the whole system works (processes and topics, the behaviour tree node by node, failsafes, perception, control, localization, what each run saves): **[docs/how-it-works.md](docs/how-it-works.md)**.
+The Gazebo window follows the drone and shows its cameras live (D435i infrared and depth, Pi Camera):
+
+![Gazebo window with live camera screens](docs/gazebo-window.jpg)
+
+How the whole system works (processes and topics, the behaviour tree node by node, failsafes, perception, control, localization, what each run saves): **[docs/how-it-works.md](docs/how-it-works.md)**. Running it on the real FireFly, without ROS: **[docs/deployment.md](docs/deployment.md)**.
 
 Each run folder has `gazebo.log`, `arducopter.log`, `openvins.log`, `imu_synth.log`, `events.jsonl`, `trace.json` (estimate, ground truth, lane estimate and commands at 10 Hz), `summary.json` and `path.png`. `HEADLESS=1` runs without the Gazebo window; `GPU=0` keeps the default OpenGL renderer.
 

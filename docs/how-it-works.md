@@ -69,26 +69,16 @@ Who decides what:
 | Topics | **gz-transport**: Gazebo's own publish/subscribe (same idea: named topics, typed messages, many subscribers) |
 | Messages | **gz.msgs** (protobuf): `Image`, `IMU`, `Odometry`, `Pose_V`, `Clock` |
 | Talking to the flight controller (MAVROS) | **MAVLink** directly, with pymavlink |
-| rqt_graph | `scripts/topic_graph.py` (below) |
 | rosbag | each run's `trace.json`, `events.jsonl` and ArduPilot's `.BIN` log |
 
 Why: OpenVINS runs as a library inside `vio_bridge`, ArduPilot speaks MAVLink, and the behaviour tree
 is plain Python, so ROS would only add a large dependency (and a SkiffOS image with ROS on the Pi 5).
-On the real drone the same processes run, with librealsense in place of the Gazebo cameras.
+On the real drone the same processes run, with librealsense in place of the Gazebo cameras: see
+[deployment.md](deployment.md) for what carries over and what still has to be written.
 
-### The rqt_graph equivalent
+### Looking at topics
 
-![Processes, topics and message types of the running simulation](topic-graph.png)
-
-Generate it from a running simulation (it asks gz-transport who publishes and subscribes to each
-topic and maps their addresses to process names):
-
-```bash
-GZ_IP=127.0.0.1 PYTHONNOUSERSITE=1 .venv-sim/bin/python scripts/topic_graph.py --out docs/topic-graph
-```
-
-It writes `docs/topic-graph.png` (above) and [`docs/topic-graph.md`](topic-graph.md) (a Mermaid
-diagram and a table: publisher, topic, message type, subscriber). To look at one topic by hand:
+Gazebo's command line shows what is on the topics while a simulation runs:
 
 ```bash
 export GZ_IP=127.0.0.1
@@ -409,7 +399,6 @@ interface (`state`, `arm`, `send`, `land`, `depth_scan`; `rowpilot/vehicle.py`).
 |---|---|---|
 | Python simulator | the `--out` folder you give, e.g. `runs/nominal/` | `path.png` (the path plot), `summary.json`, `events.jsonl`, `trace.csv` |
 | ArduPilot + Gazebo | `runs/ardupilot-<date>-<time>/` | `path.png`, `summary.json`, `events.jsonl`, `trace.json`, `logs/*.BIN` (ArduPilot dataflash log), `gazebo.log`, `arducopter.log`, `openvins.log`, `imu_synth.log` |
-| Topic graph | `docs/topic-graph.png`, `docs/topic-graph.md` | from `scripts/topic_graph.py` |
 | Camera views | `docs/views/` (or `--out`) | from `scripts/camera_views.py` |
 
 `runs/` is not committed to git. The pictures in the README are copies kept in `docs/`.
@@ -428,7 +417,16 @@ interface (`state`, `arm`, `send`, `land`, `depth_scan`; `rowpilot/vehicle.py`).
 
 ## 14. What the cameras see
 
-`scripts/camera_views.py` saves the three cameras' current images from a running simulation:
+**Live, in the Gazebo window.** `run_ardupilot_sim.sh` opens Gazebo with its own layout
+(`ardupilot/gui.config`): the 3D view follows the drone, and three screens on the right show the
+D435i infrared image (what OpenVINS tracks), the D435i depth image colour-coded (blue near, red far;
+`rowpilot/depth_view.py` converts it for display) and the Pi Camera Module 3. Drag or resize the
+screens as you like; close one with its ×. The 3D view can be moved with the mouse (that stops the
+following; right-click the drone → Follow to resume).
+
+![The Gazebo window: chase view of the FireFly in a lane, and the live camera screens](gazebo-window.jpg)
+
+**Saved pictures.** `scripts/camera_views.py` saves the three cameras' current images from a running simulation:
 
 ```bash
 GZ_IP=127.0.0.1 PYTHONNOUSERSITE=1 .venv-sim/bin/python scripts/camera_views.py --out docs/views --prefix lane-

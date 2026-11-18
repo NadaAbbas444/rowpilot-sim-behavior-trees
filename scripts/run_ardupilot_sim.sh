@@ -23,7 +23,7 @@ esac
 mkdir -p "$OUT"
 
 stop_all() {
-  pkill -x vio_bridge || true; pkill -f "rowpilot.imu_synth" || true; pkill -x arducopter || true
+  pkill -x vio_bridge || true; pkill -f "rowpilot.imu_synth" || true; pkill -f "rowpilot.depth_view" || true; pkill -x arducopter || true
   pkill -f "gz sim" || true
   for _ in $(seq 1 20); do pgrep -x arducopter > /dev/null || pgrep -f "gz sim" > /dev/null || return 0; sleep 0.5; done
   pkill -9 -x arducopter || true; pkill -9 -f "gz sim" || true
@@ -46,7 +46,8 @@ if [ "${GPU:-1}" = 1 ] && nvidia-smi -L > /dev/null 2>&1; then
 fi
 export GZ_SIM_SYSTEM_PLUGIN_PATH=$AG/build
 export GZ_SIM_RESOURCE_PATH=$GZ/models:$GZ/worlds:$AG/models:$AG/worlds
-GZ_FLAGS="-r"; [ "${HEADLESS:-0}" = 1 ] && GZ_FLAGS="-s -r --headless-rendering"
+# The window shows the 3D view following the drone and live screens of its cameras (gui.config).
+GZ_FLAGS="-r --gui-config $GZ/gui.config"; [ "${HEADLESS:-0}" = 1 ] && GZ_FLAGS="-s -r --headless-rendering"
 echo "Starting Gazebo (log: $OUT/gazebo.log) ..."
 # The world is loaded once the ArduPilot plugin listens for SITL (UDP 9002). Gazebo sometimes
 # segfaults while starting (a getenv race in gz-transport's discovery thread): start it again.
@@ -77,6 +78,14 @@ echo "Starting OpenVINS on the D435i (log: $OUT/openvins.log) ..."
 "$PY" -u -m rowpilot.imu_synth --model "$MODEL" > "$OUT/imu_synth.log" 2>&1 &
 "$OV_BRIDGE" "$GZ/openvins/estimator_config.yaml" "/$MODEL" /rowpilot/vio/odometry "/$MODEL/d435i_imu_kin" \
   > "$OUT/openvins.log" 2>&1 &
+if [ "${HEADLESS:-0}" != 1 ]; then
+  # Window: depth colour-coded for its live screen, and the 3D view following the drone.
+  "$PY" -u -m rowpilot.depth_view --model "$MODEL" > "$OUT/depth_view.log" 2>&1 &
+  gz service -s /gui/follow --reqtype gz.msgs.StringMsg --reptype gz.msgs.Boolean --timeout 5000 \
+    --req "data: \"$MODEL\"" > /dev/null 2>&1 || true
+  gz service -s /gui/follow/offset --reqtype gz.msgs.Vector3d --reptype gz.msgs.Boolean --timeout 5000 \
+    --req "x: -1.2, y: -0.6, z: 2.8" > /dev/null 2>&1 || true
+fi
 sleep 5
 echo "Flying the mission (Ctrl+C to stop) ..."
 "$PY" -u -m rowpilot ardupilot --vehicle "$VEHICLE" --out "$OUT"
