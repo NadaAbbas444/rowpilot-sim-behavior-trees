@@ -1,4 +1,5 @@
 import copy
+import json
 import time
 from pathlib import Path
 
@@ -389,3 +390,19 @@ def test_gazebo_run_stopped_while_starting_ends_at_once(gz_client, monkeypatch):
     assert time.monotonic() - t0 < 10
     assert msgs[-1]["status"] == "stopped"
     assert any("stopped while starting" in m.get("msg", "") for m in msgs)
+
+
+@pytest.mark.parametrize("open_ends", [False, True])
+def test_one_lane_is_the_mission_trees_lane(client, open_ends):
+    mission = client.get("/api/default-tree", params={"lanes": 3, "open_ends": open_ends}).json()
+    lane = client.get("/api/lane", params={"lane": 3, "open_ends": open_ends}).json()
+    want = sorted(
+        (n["type"], n["name"], json.dumps(n["params"], sort_keys=True))
+        for n in mission["nodes"]
+        if n["name"].startswith("Lane 3")
+    )
+    got = sorted((n["type"], n["name"], json.dumps(n["params"], sort_keys=True)) for n in lane["nodes"])
+    assert got == want
+    root = next(n for n in lane["nodes"] if n["id"] == lane["root"])
+    assert root["name"] == "Lane 3" and all("position" in n for n in lane["nodes"])
+    assert client.get("/api/lane", params={"lane": 0}).status_code == 422

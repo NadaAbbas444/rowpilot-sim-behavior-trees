@@ -546,6 +546,44 @@ def build_from_graph(graph: dict, ctx: MissionContext) -> py_trees.behaviour.Beh
 
 
 # ---- the mission tree as a graph ------------------------------------------------------------------
+def _add_lane(add, k: int, closed_end: bool) -> str:
+    """Lane k's subtree (k from 1), built with default_graph's add(); returns the lane's id. A dead-end
+    lane: in to the turning point, turn round, back out; an open lane: one sweep through."""
+    n = f"Lane {k}"
+    steps = [
+        add("GoToLaneEntry", f"{n}: GoToEntry", lane=k, from_lane=k - 1),
+        add("AlignToLane", f"{n}: Align", lane=k),
+    ]
+    if closed_end:
+        steps += [
+            add("SweepLane", f"{n}: Sweep in", lane=k, direction="+x", end="turn point", stop_at_end=True, final=False),
+            add("TurnAround", f"{n}: TurnAround", lane=k),
+            add("SweepLane", f"{n}: Sweep out", lane=k, direction="-x", end="row start"),
+        ]
+    else:
+        steps.append(add("SweepLane", f"{n}: Sweep", lane=k))
+    steps.append(add("ExitLane", f"{n}: Exit", lane=k))
+    return add("Sequence", n, steps)
+
+
+def lane_graph(lane: int, closed_end: bool = True) -> dict:
+    """One lane's subtree as a graph, as in the mission tree: for the editor's Add lane.
+    "root" is the lane's Sequence; ids are local (the editor renumbers them)."""
+    nodes: list[dict] = []
+    edges: list[dict] = []
+
+    def add(type_: str, name: str, children: list[str] = (), **params) -> str:
+        nid = f"n{len(nodes) + 1}"
+        nodes.append({"id": nid, "type": type_, "name": name, "params": params})
+        edges.extend({"source": nid, "target": c} for c in children)
+        return nid
+
+    root = _add_lane(add, lane, closed_end)
+    graph = {"version": GRAPH_VERSION, "nodes": nodes, "edges": edges, "root": root}
+    tidy_layout(graph)
+    return graph
+
+
 def default_graph(layout: GreenhouseLayout) -> dict:
     """mission.build_tree as a graph: the starting point in the editor. Building it gives the same
     tree (tests/test_editor.py runs both and compares)."""
@@ -582,31 +620,7 @@ def default_graph(layout: GreenhouseLayout) -> dict:
     choice = add("Selector", "FailsafeChoice", [glitch, emergency, rtl])
     guard = add("Selector", "SafetyGuard", [healthy, add("SuccessIsFailure", "Failsafe", [choice])])
 
-    lanes = []
-    for i in range(layout.n_lanes):
-        k, n = i + 1, f"Lane {i + 1}"
-        steps = [
-            add("GoToLaneEntry", f"{n}: GoToEntry", lane=k, from_lane=i),
-            add("AlignToLane", f"{n}: Align", lane=k),
-        ]
-        if layout.closed_end:
-            steps += [
-                add(
-                    "SweepLane",
-                    f"{n}: Sweep in",
-                    lane=k,
-                    direction="+x",
-                    end="turn point",
-                    stop_at_end=True,
-                    final=False,
-                ),
-                add("TurnAround", f"{n}: TurnAround", lane=k),
-                add("SweepLane", f"{n}: Sweep out", lane=k, direction="-x", end="row start"),
-            ]
-        else:
-            steps.append(add("SweepLane", f"{n}: Sweep", lane=k))
-        steps.append(add("ExitLane", f"{n}: Exit", lane=k))
-        lanes.append(add("Sequence", n, steps))
+    lanes = [_add_lane(add, k, layout.closed_end) for k in range(1, layout.n_lanes + 1)]
 
     mission = add(
         "Sequence",

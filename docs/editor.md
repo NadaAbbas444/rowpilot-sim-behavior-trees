@@ -41,11 +41,13 @@ passes `/api` (and the run's WebSocket) to the Python server.
 
 | | |
 |---|---|
-| **Mission tree** | loads the greenhouse mission (`mission.build_tree`) for the lanes set in *Run settings*. Lanes 2 onwards start folded; **Unfold all** shows them |
+| **Mission tree** | loads the greenhouse mission (`mission.build_tree`), sweeping every lane of the greenhouse. Lanes 2 onwards start folded; **Unfold all** shows them |
+| **Lanes − 3 of 6 +** | which lanes the tree sweeps. The greenhouse is fixed (6 lanes, *Run settings*; the Gazebo world always has all of them); the tree decides how many to sweep. **+** adds the first lane the tree does not sweep yet, right after the last lane, with the same steps as the mission tree; **−** removes the last lane with all its steps |
 | **Palette** (left) | every node type, grouped. Drag one onto the canvas, or double-click it: with a node selected, the new node becomes its last child (or, if the selected node cannot take children, comes right after it) |
 | **Connecting** | drag from a parent's right handle to a child's left handle. The editor refuses what cannot work: children on an action or condition, a second child on a decorator, two parents, a cycle |
 | **Order** | a parent ticks its children **top to bottom, as drawn**. Move a node up or down to change the order; **Tidy** lays the tree out again keeping that order |
 | **Node** tab | the selected node: what it does, its name and parameters, and its own log from the last run |
+| **Delete** | the Delete key or the Node tab's button; a composite is deleted with everything under it (a lane with its steps) |
 | **Problems** | the server checks the tree as you edit (unknown lane, missing child, duplicate name, loose node...). Nodes with a problem get a dashed red border, the status bar counts them, and **Run** waits until there are none |
 | **Run** | runs the tree in the chosen simulator (the badge next to the speed says which). Python: at the chosen **speed** (simulated seconds per real second; *max* as fast as it goes). Gazebo: real time, the Gazebo window opens. **follow** keeps the running node in view |
 | **Stop** | Python: ends the run. Gazebo: lands the drone where it is and closes the simulation (or closes it at once if it is still starting) |
@@ -134,6 +136,7 @@ flowchart LR
 |---|---|
 | `GET /api/node-types` | the palette: types, categories, parameters with defaults and limits |
 | `GET /api/default-tree?lanes=6&open_ends=false` | the mission tree as a graph |
+| `GET /api/lane?lane=3&open_ends=false` | one lane's steps, as in the mission tree (for **+**) |
 | `GET /api/layout?lanes=...` | greenhouse geometry and the planned path, for the map |
 | `GET /api/settings/defaults` | default run settings |
 | `GET /api/simulators` | which simulators can run here, and what the Gazebo one is missing |

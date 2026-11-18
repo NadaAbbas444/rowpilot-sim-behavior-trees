@@ -165,3 +165,89 @@ export function paramSummary(params: Record<string, ParamValue>, spec?: NodeType
     .filter(Boolean)
     .join(' · ');
 }
+
+const LANE_NAME = /^Lane (\d+)$/;
+
+/** The lane numbers of the lane subtrees ("Lane 3") in the tree. */
+export function laneNumbers(nodes: BTNode[]): number[] {
+  return nodes.map((n) => LANE_NAME.exec(n.data.name)).filter(Boolean).map((m) => Number(m![1]));
+}
+
+/**
+ * Where a new lane goes, as (parent, y): right after the highest-numbered lane in its parent; with no
+ * lanes yet, into the Mission sequence before ReturnHome (or last); else into the selected node if it
+ * can take children. null if there is nowhere sensible.
+ */
+export function laneSlot(
+  nodes: BTNode[],
+  edges: Edge[],
+  specs: Map<string, NodeTypeSpec>,
+  selected: string | null,
+): { parent: string; y: number } | null {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const parentOf = new Map(edges.map((e) => [e.target, e.source]));
+  const kids = childrenOf(nodes, edges);
+  const below = (id: string) => byId.get(id)!.position.y + 0.5; // sorts right after id, before its next sibling
+  const lanes = nodes
+    .filter((n) => LANE_NAME.test(n.data.name) && parentOf.has(n.id))
+    .sort((a, b) => Number(LANE_NAME.exec(b.data.name)![1]) - Number(LANE_NAME.exec(a.data.name)![1]));
+  if (lanes.length) return { parent: parentOf.get(lanes[0].id)!, y: below(lanes[0].id) };
+  const lastChild = (pid: string) => {
+    const ks = kids.get(pid) ?? [];
+    const p = byId.get(pid)!;
+    return ks.length ? below(ks[ks.length - 1]) : p.position.y;
+  };
+  const takesKids = (n: BTNode) => {
+    const spec = specs.get(n.data.type);
+    return spec !== undefined && spec.max_children !== 0; // null: any number
+  };
+  const mission = nodes.find((n) => n.data.name === 'Mission' && takesKids(n));
+  if (mission) {
+    const home = (kids.get(mission.id) ?? []).find((k) => /ReturnHome/.test(byId.get(k)!.data.type + byId.get(k)!.data.name));
+    return { parent: mission.id, y: home ? byId.get(home)!.position.y - 0.5 : lastChild(mission.id) };
+  }
+  if (selected && byId.has(selected) && specs.get(byId.get(selected)!.data.type)?.max_children === null) {
+    return { parent: selected, y: lastChild(selected) };
+  }
+  return null;
+}
+
+/** Add a subtree (a graph with a root) under `parent` at height y, with fresh ids. */
+export function insertSubtree(
+  nodes: BTNode[],
+  edges: Edge[],
+  sub: Graph & { root: string },
+  specs: Map<string, NodeTypeSpec>,
+  parent: string,
+  y: number,
+): { nodes: BTNode[]; edges: Edge[]; root: string } {
+  let next = Number(nextId(nodes).slice(1));
+  const ids = new Map(sub.nodes.map((n) => [n.id, `n${next++}`]));
+  const p = nodes.find((n) => n.id === parent)!;
+  const r = sub.nodes.find((n) => n.id === sub.root)!.position ?? { x: 0, y: 0 };
+  const flow = toFlow(sub, specs);
+  const added = flow.nodes.map((n) => ({
+    ...n,
+    id: ids.get(n.id)!,
+    position: { x: p.position.x + DX + (n.position.x - r.x), y: y + (n.position.y - r.y) },
+  }));
+  const addedEdges = sub.edges.map((e) => edgeFor(ids.get(e.source)!, ids.get(e.target)!));
+  const root = ids.get(sub.root)!;
+  return { nodes: [...nodes, ...added], edges: [...edges, ...addedEdges, edgeFor(parent, root)], root };
+}
+
+/** The lowest lane number (1..total) the tree does not sweep yet, or null if it has them all. */
+export function nextLane(nodes: BTNode[], total: number): number | null {
+  const have = new Set(laneNumbers(nodes));
+  for (let k = 1; k <= total; k++) if (!have.has(k)) return k;
+  return null;
+}
+
+/** The tree without `id` and everything under it. */
+export function removeSubtree(nodes: BTNode[], edges: Edge[], id: string): { nodes: BTNode[]; edges: Edge[] } {
+  const gone = new Set([id, ...descendants(id, childrenOf(nodes, edges))]);
+  return {
+    nodes: nodes.filter((n) => !gone.has(n.id)),
+    edges: edges.filter((e) => !gone.has(e.source) && !gone.has(e.target)),
+  };
+}

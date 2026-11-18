@@ -13,7 +13,7 @@ type NumKey = { [K in keyof Settings]: Settings[K] extends number ? K : never }[
 
 type Field = [NumKey, string, string, number];
 const GREENHOUSE: Field[] = [
-  ['lanes', 'lanes', 'number of lanes in the greenhouse', 1],
+  ['lanes', 'lanes', 'how many lanes the greenhouse has (6 in the real one); the tree chooses which to sweep: Lanes − + in the toolbar', 1],
   ['row_length', 'row length (m)', '', 0.1],
   ['path_width', 'lane width (m)', 'free width between the crop faces', 0.1],
 ];

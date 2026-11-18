@@ -34,6 +34,8 @@ export const api = {
   defaultTree: (lanes: number, openEnds: boolean) =>
     call<Graph>(`/api/default-tree?lanes=${lanes}&open_ends=${openEnds}`),
   settingsDefaults: () => call<Settings>('/api/settings/defaults'),
+  lane: (lane: number, openEnds: boolean) =>
+    call<Graph & { root: string }>(`/api/lane?lane=${lane}&open_ends=${openEnds}`),
   simulators: () => call<Simulators>('/api/simulators'),
   layout: (s: Settings) =>
     call<LayoutInfo>(

@@ -137,6 +137,32 @@ is no entry from the back. For every lane the drone:
 
 ![One lane, step by step](bt/lane.png)
 
+### How the drone knows where the next lane is
+
+From the **greenhouse map**, not by searching for it. The layout (`GreenhouseLayout` in
+`rowpilot/layout.py`) knows where every lane is: lane centres are one *pitch* apart (lane width + crop
+row width = 1.6 m + 0.4 m = 2 m), lane 1 runs along y = 0 starting at x = 0. Lane *k*'s **entry** is
+in the headland, 1.5 m before the rows, on the lane's centre line:
+
+    entry(k) = (x = −headland, y = (k − 1) × pitch)      e.g. lane 3: (−1.5 m, 4.0 m)
+
+(`GreenhouseLayout.lane_entry`; with open lanes, odd lanes are entered from the far end instead.)
+
+1. **GoToEntry** (`GoToLaneEntry`) flies there on the visual odometry position (in Gazebo: ArduPilot's
+   EKF3, fed by OpenVINS), first back out through the previous lane's exit, then across the headland,
+   and turns to face down the lane. Visual odometry drifts by a few centimetres, so the drone arrives
+   *roughly* in front of the lane.
+2. **Align** (`AlignToLane`) then uses the **depth camera**: it creeps forward until it sees both crop
+   faces, and steers until it is centred and straight (within 8 cm and 4° over a second). This is what
+   puts the drone accurately into the lane, whatever the odometry error.
+3. While sweeping, the known lane centre corrects the odometry's sideways drift (lane-centric
+   localization, §9), so the next lane's entry is found from a corrected position.
+
+So the map gives *where to go* and the camera gives *exactly where the lane is*. Nothing searches for
+lane openings: for the real greenhouse, measure the lane width, crop row width, row length, headland
+and home position and put them into the layout (or the editor's Run settings). Detecting the openings
+with the depth camera while crossing the headland would make the map less critical; it is not done yet.
+
 Then the next lane, and finally home and land. With `--open-ends` (`GreenhouseLayout(closed_end=False)`)
 the lanes are open at both ends and swept serpentine instead (in one end, out the other).
 

@@ -30,6 +30,11 @@ import {
   descendants,
   edgeFor,
   fromFlow,
+  insertSubtree,
+  laneNumbers,
+  laneSlot,
+  nextLane,
+  removeSubtree,
   nextId,
   tidy,
   toFlow,
@@ -351,9 +356,44 @@ function Editor() {
     setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
 
   const deleteNode = (id: string) => {
-    setNodes((ns) => ns.filter((n) => n.id !== id));
-    setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
+    // with everything under it: a lane's steps without the lane would be left loose
+    const r = removeSubtree(nodes, edges, id);
+    setNodes(r.nodes);
+    setEdges(r.edges);
     setSelected(null);
+  };
+
+  /** The greenhouse is fixed (Run settings); the tree chooses which of its lanes to sweep. + adds the
+   *  first lane the tree does not sweep yet, as the mission tree builds it; − removes the last one. */
+  const lanesInTree = useMemo(() => laneNumbers(nodes), [nodes]);
+  const addLane = async () => {
+    if (!settings) return;
+    const k = nextLane(nodes, settings.lanes);
+    if (k === null) return say(`the tree already sweeps all ${settings.lanes} lanes of the greenhouse`, true);
+    const slot = laneSlot(nodes, edges, specs, selected);
+    if (!slot) return say('Select the sequence the lane should go into (e.g. Mission), then press + again', true);
+    try {
+      const sub = await api.lane(k, settings.open_ends);
+      const r = insertSubtree(nodes, edges, sub, specs, slot.parent, slot.y);
+      const ns = tidy(r.nodes, r.edges, collapsed).map((n) => ({ ...n, selected: n.id === r.root }));
+      setEdges(r.edges);
+      setNodes(ns);
+      setSelected(r.root);
+      say(`added Lane ${k}: the tree sweeps ${lanesInTree.length + 1} of ${settings.lanes} lanes`);
+    } catch (e) {
+      say((e as Error).message, true);
+    }
+  };
+  const removeLane = () => {
+    const last = nodes
+      .filter((n) => /^Lane \d+$/.test(n.data.name))
+      .sort((a, b) => Number(b.data.name.slice(5)) - Number(a.data.name.slice(5)))[0];
+    if (!last) return say('the tree has no lanes to remove', true);
+    const r = removeSubtree(nodes, edges, last.id);
+    setEdges(r.edges);
+    setNodes(tidy(r.nodes, r.edges, collapsed));
+    setSelected(null);
+    say(`removed ${last.data.name}: the tree sweeps ${lanesInTree.length - 1} of ${settings?.lanes} lanes`);
   };
 
   // ---- files ---------------------------------------------------------------------------------------
@@ -476,6 +516,22 @@ function Editor() {
             Unfold all
           </button>
         </div>
+        <div className="group lanes" title="the lanes the tree sweeps, of the greenhouse's lanes (Run settings)">
+          <span className="muted">Lanes</span>
+          <button onClick={removeLane} disabled={!lanesInTree.length} aria-label="remove the last lane from the tree">
+            −
+          </button>
+          <span className="lane-count">
+            {lanesInTree.length} of {settings?.lanes ?? '–'}
+          </span>
+          <button
+            onClick={addLane}
+            disabled={!settings || lanesInTree.length >= settings.lanes}
+            aria-label="add the next lane to the tree"
+          >
+            +
+          </button>
+        </div>
         <div className="group run-group">
           <button
             className={`sim-badge ${gazeboSim ? 'gz' : ''}`}
@@ -532,6 +588,14 @@ function Editor() {
               if (id) setTab('node');
             }}
             deleteKeyCode={['Backspace', 'Delete']}
+            onBeforeDelete={async ({ nodes: del, edges: delEdges }) => {
+              // a composite goes with everything under it, as with the Node tab's button
+              const ids = new Set(del.flatMap((n) => [n.id, ...descendants(n.id, kids)]));
+              return {
+                nodes: nodes.filter((n) => ids.has(n.id)),
+                edges: [...delEdges, ...edges.filter((e) => ids.has(e.source) || ids.has(e.target))],
+              };
+            }}
             minZoom={0.1}
             colorMode="system"
             proOptions={{ hideAttribution: true }}

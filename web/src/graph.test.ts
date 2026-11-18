@@ -3,7 +3,12 @@ import {
   childrenOf,
   connectionProblem,
   fromFlow,
+  insertSubtree,
+  laneNumbers,
+  laneSlot,
   nextId,
+  nextLane,
+  removeSubtree,
   paramSummary,
   tidy,
   toFlow,
@@ -117,5 +122,72 @@ describe('helpers', () => {
     const s = SPECS.get('SweepLane');
     expect(paramSummary({ lane: 2, direction: '+x', stop_at_end: true }, s)).toBe('lane 2 · +x · stop at end');
     expect(paramSummary({ lane: 1, direction: 'auto', stop_at_end: false }, s)).toBe('lane 1');
+  });
+});
+
+describe('lanes', () => {
+  // Mission -> Preflight, Lane 1 (-> 2 steps), Lane 2 (-> 2 steps), ReturnHome
+  const lanesGraph: Graph = {
+    version: 1,
+    nodes: [
+      { id: 'm', type: 'Sequence', name: 'Mission', params: {}, position: { x: 0, y: 200 } },
+      { id: 'p', type: 'Land', name: 'Preflight', params: {}, position: { x: 260, y: 0 } },
+      { id: 'l1', type: 'Sequence', name: 'Lane 1', params: {}, position: { x: 260, y: 100 } },
+      { id: 'a1', type: 'Land', name: 'Lane 1: A', params: {}, position: { x: 520, y: 80 } },
+      { id: 'b1', type: 'Land', name: 'Lane 1: B', params: {}, position: { x: 520, y: 120 } },
+      { id: 'l2', type: 'Sequence', name: 'Lane 2', params: {}, position: { x: 260, y: 200 } },
+      { id: 'a2', type: 'Land', name: 'Lane 2: A', params: {}, position: { x: 520, y: 180 } },
+      { id: 'b2', type: 'Land', name: 'Lane 2: B', params: {}, position: { x: 520, y: 220 } },
+      { id: 'h', type: 'Land', name: 'ReturnHome', params: {}, position: { x: 260, y: 300 } },
+    ],
+    edges: [
+      ['m', 'p'], ['m', 'l1'], ['l1', 'a1'], ['l1', 'b1'], ['m', 'l2'], ['l2', 'a2'], ['l2', 'b2'], ['m', 'h'],
+    ].map(([source, target]) => ({ source, target })),
+  };
+  const lane3 = {
+    version: 1,
+    root: 'n3',
+    nodes: [
+      { id: 'n1', type: 'Land', name: 'Lane 3: A', params: {}, position: { x: 260, y: 0 } },
+      { id: 'n2', type: 'Land', name: 'Lane 3: B', params: {}, position: { x: 260, y: 64 } },
+      { id: 'n3', type: 'Sequence', name: 'Lane 3', params: {}, position: { x: 0, y: 32 } },
+    ],
+    edges: [{ source: 'n3', target: 'n1' }, { source: 'n3', target: 'n2' }],
+  };
+
+  it('finds the lanes and the next one the tree does not sweep', () => {
+    const { nodes } = toFlow(lanesGraph, SPECS);
+    expect(laneNumbers(nodes).sort()).toEqual([1, 2]);
+    expect(nextLane(nodes, 6)).toBe(3);
+    expect(nextLane(nodes, 2)).toBeNull();
+    expect(nextLane(nodes.filter((n) => n.id !== 'l1'), 6)).toBe(1); // a gap is filled first
+  });
+
+  it('adds a lane right after the last one, before ReturnHome, with fresh ids', () => {
+    const { nodes, edges } = toFlow(lanesGraph, SPECS);
+    const slot = laneSlot(nodes, edges, SPECS, null)!;
+    expect(slot.parent).toBe('m');
+    const r = insertSubtree(nodes, edges, lane3, SPECS, slot.parent, slot.y);
+    const order = childrenOf(r.nodes, r.edges).get('m')!.map((id) => r.nodes.find((n) => n.id === id)!.data.name);
+    expect(order).toEqual(['Preflight', 'Lane 1', 'Lane 2', 'Lane 3', 'ReturnHome']);
+    const lane = childrenOf(r.nodes, r.edges).get(r.root)!.map((id) => r.nodes.find((n) => n.id === id)!.data.name);
+    expect(lane).toEqual(['Lane 3: A', 'Lane 3: B']);
+    expect(new Set(r.nodes.map((n) => n.id)).size).toBe(r.nodes.length);
+  });
+
+  it('goes into the Mission sequence when there are no lanes yet', () => {
+    const g = { ...lanesGraph, nodes: lanesGraph.nodes.filter((n) => !n.name.startsWith('Lane')) };
+    g.edges = lanesGraph.edges.filter((e) => g.nodes.some((n) => n.id === e.target));
+    const { nodes, edges } = toFlow(g, SPECS);
+    const r = insertSubtree(nodes, edges, lane3, SPECS, ...Object.values(laneSlot(nodes, edges, SPECS, null)!) as [string, number]);
+    const order = childrenOf(r.nodes, r.edges).get('m')!.map((id) => r.nodes.find((n) => n.id === id)!.data.name);
+    expect(order).toEqual(['Preflight', 'Lane 3', 'ReturnHome']);
+  });
+
+  it('removes a lane with all its steps', () => {
+    const { nodes, edges } = toFlow(lanesGraph, SPECS);
+    const r = removeSubtree(nodes, edges, 'l2');
+    expect(r.nodes.map((n) => n.id)).toEqual(['m', 'p', 'l1', 'a1', 'b1', 'h']);
+    expect(r.edges.some((e) => ['l2', 'a2', 'b2'].includes(e.target))).toBe(false);
   });
 });

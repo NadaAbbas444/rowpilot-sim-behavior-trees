@@ -95,7 +95,7 @@ export default function Inspector({ id, data, spec, status, issues, logs, childr
         </ul>
       )}
       <button className="danger" onClick={onDelete}>
-        Delete node
+        {children.length ? `Delete with everything under it` : 'Delete node'}
       </button>
       <h4>This node's log</h4>
       {logs.length === 0 ? (

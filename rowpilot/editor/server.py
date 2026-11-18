@@ -2,6 +2,7 @@
 
     GET  /api/node-types               the node palette: types, categories, parameters
     GET  /api/default-tree             the mission tree (mission.build_tree) as a graph
+    GET  /api/lane?lane=7              one lane's subtree, as in the mission tree (for Add lane)
     GET  /api/layout                   greenhouse geometry and the planned path, for the map
     GET  /api/simulators               which simulators can run here (Gazebo needs the full setup)
     POST /api/validate                 {graph, settings} -> {errors: [{node, message}]}
@@ -29,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..layout import GreenhouseLayout
-from .nodes import GRAPH_VERSION, default_graph, node_types, validate
+from .nodes import GRAPH_VERSION, default_graph, lane_graph, node_types, validate
 from .runs import GazeboSetup, RunManager, Settings
 
 WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
@@ -126,6 +127,10 @@ def create_app(
     @app.get("/api/default-tree")
     def get_default_tree(lanes: Annotated[int, Query(ge=1, le=20)] = 6, open_ends: bool = False) -> dict:
         return default_graph(GreenhouseLayout(n_lanes=lanes, closed_end=not open_ends))
+
+    @app.get("/api/lane")
+    def get_lane(lane: Annotated[int, Query(ge=1, le=20)], open_ends: bool = False) -> dict:
+        return lane_graph(lane, closed_end=not open_ends)
 
     @app.get("/api/layout")
     def get_layout(
