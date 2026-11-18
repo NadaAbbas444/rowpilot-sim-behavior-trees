@@ -155,6 +155,7 @@ class ArduPilotVehicle:
             self.mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
             mode,
             wait_ack=True,
+            timeout=30.0,
         )
 
     # ---- VIO -> ArduPilot ----------------------------------------------------------------------
@@ -235,13 +236,20 @@ class ArduPilotVehicle:
         raise TimeoutError("ArduPilot EKF3 has no position from the visual odometry")
 
     def arm(self, timeout_s: float = 60.0, takeoff_alt: float = 1.0) -> bool:
+        """See _arm. timeout_s is simulation time: pre-arm checks (e.g. IMU consistency right after
+        boot) can take a while to pass, and the simulator may run slower than real time."""
+        return self._arm(timeout_s, takeoff_alt)
+
+    def _arm(self, timeout_s: float, takeoff_alt: float) -> bool:
         """GUIDED, arm, and take off at once: ArduCopter flies GUIDED velocity targets only when
         airborne, and disarms by itself if it sits armed on the ground. The mission's Takeoff node
         then climbs to the mission altitude with velocity targets."""
-        end = time.monotonic() + timeout_s
+        end = self.sensors.sim_t + timeout_s
         mav = self.mavutil.mavlink
-        while time.monotonic() < end:
-            if self.set_mode(GUIDED) and self._command(mav.MAV_CMD_COMPONENT_ARM_DISARM, 1, wait_ack=True):
+        while self.sensors.sim_t < end:
+            if self.set_mode(GUIDED) and self._command(
+                mav.MAV_CMD_COMPONENT_ARM_DISARM, 1, wait_ack=True, timeout=30.0
+            ):
                 self._took_off = self._command(
                     mav.MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, takeoff_alt, wait_ack=True, timeout=30.0
                 )
