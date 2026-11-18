@@ -270,27 +270,33 @@ class AlignToLane(Once):
         super().__init__(name, ctx)
         self.lane_idx, self.follower = lane, LaneFollower()
 
+    WINDOW_S = 1.0
+
     def start(self) -> None:
         self.follower.reset()
-        self.good_since: float | None = None
+        self.recent: list[tuple[float, float, float]] = []  # (t, offset, heading) of valid estimates
 
     def run(self) -> Status:
         c, est = self.ctx, self.ctx.lane
         if c.s.t - self.t0 > c.params.align_timeout_s:
             return self.fail("could not align")
         if not est.valid:
+            self.recent.clear()
             c.send(Command(vx=0.15))  # creep forward until the crop faces come into view
             return Status.RUNNING
         c.send(self.follower.step(est, 0.15, c.dt))
-        if abs(est.lateral_offset) < 0.08 and abs(est.heading_error) < math.radians(4):
-            self.good_since = self.good_since if self.good_since is not None else c.s.t
-            if c.s.t - self.good_since >= 1.0:
-                self.log(
-                    f"centred: offset {est.lateral_offset:+.2f} m, heading {math.degrees(est.heading_error):+.1f} deg"
-                )
-                return Status.SUCCESS
-        else:
-            self.good_since = None
+        # Centred = over the last second, on average within 8 cm and 4 deg, and no frame far off. Single
+        # depth frames are noisy in leafy rows; asking every frame to be within 8 cm rarely succeeds.
+        self.recent.append((c.s.t, est.lateral_offset, est.heading_error))
+        self.recent = [r for r in self.recent if r[0] > c.s.t - self.WINDOW_S - 1e-6]
+        if self.recent[-1][0] - self.recent[0][0] < self.WINDOW_S - c.dt - 1e-6:
+            return Status.RUNNING
+        off = float(np.mean([r[1] for r in self.recent]))
+        hdg = float(np.mean([r[2] for r in self.recent]))
+        worst = max(abs(r[1]) for r in self.recent)
+        if abs(off) < 0.08 and abs(hdg) < math.radians(4) and worst < 0.2:
+            self.log(f"centred: offset {off:+.2f} m, heading {math.degrees(hdg):+.1f} deg")
+            return Status.SUCCESS
         return Status.RUNNING
 
 

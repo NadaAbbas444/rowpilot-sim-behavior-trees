@@ -49,8 +49,12 @@ def altitude_hold(z: float, z_ref: float, k: float = 1.2, v_max: float = 0.8) ->
 class LaneFollower:
     """Keeps the drone on the lane centre line while moving forward at a set speed."""
 
-    def __init__(self, k_lat: float = 2.0, ki_lat: float = 0.2, k_yaw: float = 1.5, vy_max: float = 0.8):
-        self.lat = PID(k_lat, ki_lat, 0.2)
+    # Tuned for the flight controller's measured response (ArduCopter GUIDED: 0.5 s dead time, 0.3 s lag,
+    # see SimConfig): the earlier k_lat 2.0 / k_yaw 1.5 made the drone swing across the lane in ArduPilot.
+    def __init__(
+        self, k_lat: float = 0.6, ki_lat: float = 0.0, k_yaw: float = 0.8, vy_max: float = 0.8, kd_lat: float = 0.2
+    ):
+        self.lat = PID(k_lat, ki_lat, kd_lat)
         self.k_yaw, self.vy_max = k_yaw, vy_max
 
     def reset(self) -> None:
@@ -74,8 +78,8 @@ def goto_command(
     start: tuple[float, float] | None = None,
     v_max: float = 1.0,
     k_pos: float = 0.8,
-    k_cross: float = 1.8,
-    k_yaw: float = 1.5,
+    k_cross: float = 0.9,  # cross-track and yaw gains tuned for the flight controller's delay (see SimConfig)
+    k_yaw: float = 0.8,
     tol: float = 0.15,
 ) -> tuple[Command, bool]:
     """Fly to (tx, ty) in the map frame, along the straight line from `start` if given.

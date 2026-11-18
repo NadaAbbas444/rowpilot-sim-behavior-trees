@@ -12,6 +12,7 @@ The true state is kept separately so tests can judge the mission against ground 
 from __future__ import annotations
 
 import math
+from collections import deque
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -27,7 +28,10 @@ class SimConfig:
     start_battery_pct: float = 100.0
     hover_drain_pct_s: float = 0.12  # about 14 minutes of hover on a full pack
     move_drain_pct_per_m: float = 0.05
-    velocity_lag_s: float = 0.35
+    # The flight controller's response to velocity targets, measured on ArduCopter SITL (GUIDED, default
+    # jerk/acceleration limits): 0.5 s dead time, then a first-order lag of 0.3 s.
+    command_delay_s: float = 0.5
+    velocity_lag_s: float = 0.3
     wind_sigma: float = 0.3  # m/s, gust strength (greenhouse fans, open vents)
     wind_tau_s: float = 1.5
     vo_drift_per_sqrt_m: float = 0.01  # random-walk drift of the VO position estimate
@@ -52,6 +56,7 @@ class SimVehicle:
         self.vx = self.vy = self.vz = 0.0  # world frame
         self.wind = np.zeros(2)
         self.cmd = Command()
+        self._cmd_q: deque[tuple[float, Command]] = deque()
         self.armed = False
         self.battery = self.cfg.start_battery_pct
         self.crashed = False
@@ -142,9 +147,14 @@ class SimVehicle:
         if not self.armed or self.crashed:
             self.vx = self.vy = self.vz = 0.0
             return
+        # The command the flight controller acts on now is the one sent command_delay_s ago.
+        self._cmd_q.append((self.t, self.cmd))
+        while len(self._cmd_q) > 1 and self._cmd_q[1][0] <= self.t - c.command_delay_s:
+            self._cmd_q.popleft()
+        cmd = self._cmd_q[0][1]
         cy, sy = math.cos(self.yaw), math.sin(self.yaw)
-        tvx = cy * self.cmd.vx - sy * self.cmd.vy
-        tvy = sy * self.cmd.vx + cy * self.cmd.vy
+        tvx = cy * cmd.vx - sy * cmd.vy
+        tvy = sy * cmd.vx + cy * cmd.vy
         airborne = self.z > 0.05
         if airborne:  # Ornstein-Uhlenbeck gusts
             self.wind += -self.wind * dt / c.wind_tau_s + c.wind_sigma * math.sqrt(2 * dt / c.wind_tau_s) * (
@@ -157,7 +167,7 @@ class SimVehicle:
         k = min(1.0, dt / c.velocity_lag_s)
         self.vx += (tvx - (self.vx + self.wind[0])) * k
         self.vy += (tvy - (self.vy + self.wind[1])) * k
-        self.vz += (self.cmd.vz - self.vz) * k
+        self.vz += (cmd.vz - self.vz) * k
         if not airborne:
             self.vx = self.vy = 0.0  # no sliding along the floor
         dx, dy = (self.vx + self.wind[0]) * dt, (self.vy + self.wind[1]) * dt
@@ -165,7 +175,7 @@ class SimVehicle:
         self.y += dy
         self.z = max(0.0, self.z + self.vz * dt)
         if airborne:
-            self.yaw = (self.yaw + max(-1.0, min(1.0, self.cmd.yaw_rate)) * dt + math.pi) % (2 * math.pi) - math.pi
+            self.yaw = (self.yaw + max(-1.0, min(1.0, cmd.yaw_rate)) * dt + math.pi) % (2 * math.pi) - math.pi
 
         dist = math.hypot(dx, dy)
         if dist > 0:
