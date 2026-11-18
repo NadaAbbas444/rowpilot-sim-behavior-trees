@@ -15,7 +15,8 @@ OUT=$REPO/runs/ardupilot-$(date +%Y%m%d-%H%M%S)
 mkdir -p "$OUT"
 
 stop_all() {
-  pkill -x vio_bridge || true; pkill -x arducopter || true; pkill -f "gz sim" || true
+  pkill -x vio_bridge || true; pkill -f "rowpilot.imu_synth" || true; pkill -x arducopter || true
+  pkill -f "gz sim" || true
   for _ in $(seq 1 20); do pgrep -x arducopter > /dev/null || pgrep -f "gz sim" > /dev/null || return 0; sleep 0.5; done
   pkill -9 -x arducopter || true; pkill -9 -f "gz sim" || true
 }
@@ -23,19 +24,51 @@ trap stop_all EXIT
 stop_all
 
 "$REPO/ardupilot/install.sh" "$GZ" "$PY" > /dev/null
+# Keep gz-transport on loopback: with several network interfaces (Wi-Fi, docker0 ...) the GUI's
+# "starting world" message can miss the server, which then waits for it forever.
+export GZ_IP=${GZ_IP:-127.0.0.1}
+# Render the cameras on the NVIDIA GPU if there is one: on hybrid (PRIME) laptops OpenGL otherwise
+# falls back to llvmpipe on the CPU, and the D435i + Pi camera rendering slows Gazebo ~100x.
+# GPU=0 to keep the default renderer.
+if [ "${GPU:-1}" = 1 ] && nvidia-smi -L > /dev/null 2>&1; then
+  export __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia
+  if [ -f /usr/share/glvnd/egl_vendor.d/10_nvidia.json ]; then
+    export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
+  fi
+fi
 export GZ_SIM_SYSTEM_PLUGIN_PATH=$AG/build
 export GZ_SIM_RESOURCE_PATH=$GZ/models:$GZ/worlds:$AG/models:$AG/worlds
 GZ_FLAGS="-r"; [ "${HEADLESS:-0}" = 1 ] && GZ_FLAGS="-s -r --headless-rendering"
 echo "Starting Gazebo (log: $OUT/gazebo.log) ..."
-# shellcheck disable=SC2086
-gz sim $GZ_FLAGS "$GZ/worlds/greenhouse.sdf" > "$OUT/gazebo.log" 2>&1 &
-sleep 15
+# The world is loaded once the ArduPilot plugin listens for SITL (UDP 9002). Gazebo sometimes
+# segfaults while starting (a getenv race in gz-transport's discovery thread): start it again.
+gz_loaded() {
+  for _ in $(seq 1 180); do
+    ss -Huln 'sport = :9002' | grep -q . && return 0
+    kill -0 "$GZ_PID" 2> /dev/null || return 1
+    sleep 1
+  done
+  return 1
+}
+for attempt in 1 2 3; do
+  # shellcheck disable=SC2086
+  gz sim $GZ_FLAGS "$GZ/worlds/greenhouse.sdf" >> "$OUT/gazebo.log" 2>&1 &
+  GZ_PID=$!
+  gz_loaded && break
+  [ "$attempt" = 3 ] && { echo "Gazebo did not load the world, see $OUT/gazebo.log" >&2; exit 1; }
+  echo "Gazebo did not start (attempt $attempt), retrying ..."
+  stop_all
+done
 echo "Starting ArduCopter SITL (log: $OUT/arducopter.log) ..."
 (cd "$OUT" && "$AP/build/sitl/bin/arducopter" --model JSON --speedup 1 --slave 0 -I0 \
   --defaults "$AP/Tools/autotest/default_params/copter.parm,$AP/Tools/autotest/default_params/gazebo-iris.parm,$GZ/gh_iris.parm" \
   > "$OUT/arducopter.log" 2>&1 &)
 echo "Starting OpenVINS on the D435i (log: $OUT/openvins.log) ..."
-"$OV_BRIDGE" "$GZ/openvins/estimator_config.yaml" /gh_iris > "$OUT/openvins.log" 2>&1 &
+# Gazebo's IMU accelerometer is wrong while the drone rotates: OpenVINS gets one computed from the
+# physics (rowpilot.imu_synth), with Gazebo's gyro.
+"$PY" -u -m rowpilot.imu_synth --model gh_iris > "$OUT/imu_synth.log" 2>&1 &
+"$OV_BRIDGE" "$GZ/openvins/estimator_config.yaml" /gh_iris /rowpilot/vio/odometry /gh_iris/d435i_imu_kin \
+  > "$OUT/openvins.log" 2>&1 &
 sleep 5
 echo "Flying the mission (Ctrl+C to stop) ..."
 "$PY" -u -m rowpilot ardupilot --out "$OUT"

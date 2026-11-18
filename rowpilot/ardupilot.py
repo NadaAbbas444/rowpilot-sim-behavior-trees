@@ -96,6 +96,9 @@ class ArduPilotVehicle:
         self.conn.wait_heartbeat(timeout=60)
         self.msgs: dict[str, object] = {}
         self._took_off = self._landing = False
+        self._takeoff_alt = 0.0
+        self._climbing = False  # NAV_TAKEOFF in progress: velocity targets would cancel it, see send()
+        self.last_cmd = Command()  # last velocity target sent, for the trace
         self._origin_set = False
         self._z_offset = 0.0  # EKF3 local height is relative to where it started; see wait_ready()
         self._lock = threading.Lock()
@@ -253,6 +256,7 @@ class ArduPilotVehicle:
                 self._took_off = self._command(
                     mav.MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, takeoff_alt, wait_ack=True, timeout=30.0
                 )
+                self._takeoff_alt, self._climbing = takeoff_alt, self._took_off
                 if not self._took_off:
                     print("take-off refused", flush=True)
                 return self._took_off
@@ -264,6 +268,10 @@ class ArduPilotVehicle:
         if self.state().armed:
             self._command(self.mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 0)
 
+    @property
+    def landing_requested(self) -> bool:
+        return self._landing
+
     def land(self) -> None:
         if not self._landing:
             self._landing = self.set_mode(LAND)
@@ -271,6 +279,14 @@ class ArduPilotVehicle:
     def send(self, cmd: Command) -> None:
         if self._landing:
             return  # LAND mode is in charge
+        if self._climbing:
+            # A GUIDED velocity target replaces the NAV_TAKEOFF climb, and on the ground ArduCopter does
+            # not climb on velocity targets: it sits there and disarms. Let the take-off get airborne.
+            s = self.state()
+            if s.landed or s.z < self._takeoff_alt - 0.2:
+                return
+            self._climbing = False
+        self.last_cmd = cmd
         self.conn.mav.set_position_target_local_ned_send(
             0,
             self.conn.target_system,
@@ -334,7 +350,7 @@ def run_ardupilot(
     root = build_tree(ctx)
     last: dict[str, Status] = {}
     lane_sq: dict[int, list[float]] = {}
-    outcome, hit_crop = "timeout", False
+    outcome, hit_crop, was_armed = "timeout", False, False
     t0 = sensors.sim_t
     next_tick = t0
     try:
@@ -356,6 +372,12 @@ def run_ardupilot(
                 "z": s.z,
                 "battery": s.battery_pct,
                 "node": tip.name if tip else "",
+                "lane_ok": ctx.lane.valid,
+                "lane_off": ctx.lane.lateral_offset if ctx.lane.valid else None,
+                "lane_hdg": ctx.lane.heading_error if ctx.lane.valid else None,
+                "cmd_vx": veh.last_cmd.vx,
+                "cmd_vy": veh.last_cmd.vy,
+                "cmd_yaw_rate": veh.last_cmd.yaw_rate,
             }
             if tr:
                 row.update(x=tr[0], y=tr[1], yaw=tr[3])
@@ -366,6 +388,10 @@ def run_ardupilot(
                 ):
                     lane_sq.setdefault(tip.lane_idx, []).append((tr[1] - layout.lane_center_y(tip.lane_idx)) ** 2)
             trace.append(row)
+            was_armed |= s.armed
+            if was_armed and not s.armed and not veh.landing_requested:
+                outcome = "crashed: ArduPilot disarmed in flight"  # e.g. its crash check (attitude error)
+                break
             if root.status != Status.RUNNING and s.landed:
                 outcome = "completed" if root.status == Status.SUCCESS else f"aborted: {ctx.abort_reason}"
                 break

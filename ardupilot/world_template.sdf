@@ -1,10 +1,12 @@
 <?xml version="1.0" ?>
-<!-- World template for ArduPilot SITL (ardupilot_gazebo): 400 Hz physics (2.5 ms), matching ArduCopter's 400 Hz loop; 1 kHz made the simulation 2-10x slower
-     interface, sensors rendered with ogre2. rowpilot inserts the greenhouse and the drone. -->
+<!-- World template for ArduPilot SITL (ardupilot_gazebo): 1 kHz physics for the JSON lock-step
+     interface, sensors rendered with ogre2. rowpilot inserts the greenhouse and the drone.
+     The IMU rate is the physics rate, and ArduCopter's pre-arm check needs it >= 1.8 x its 400 Hz
+     loop (720 Hz): 400 Hz physics never arms. Rendering the cameras on a GPU keeps 1 kHz real time. -->
 <sdf version="1.9">
   <world name="greenhouse">
-    <physics name="2p5ms" type="ignore">
-      <max_step_size>0.0025</max_step_size>
+    <physics name="1ms" type="ignore">
+      <max_step_size>0.001</max_step_size>
       <real_time_factor>1.0</real_time_factor>
     </physics>
     <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
