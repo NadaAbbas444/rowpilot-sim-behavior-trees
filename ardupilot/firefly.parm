@@ -1,0 +1,19 @@
+# rowpilot: the FireFly 2 airframe (quad X, 2004 motors, 4-inch props, 4S Molicel P42A 21700 pack).
+# Loaded after copter.parm and gps_denied.parm.
+FRAME_CLASS 1
+FRAME_TYPE 1
+# simulated battery: 4S1P Molicel P42A, 4.2 Ah
+BATT_CAPACITY 4200
+SIM_BATT_CAP_AH 4.2
+SIM_BATT_VOLTAGE 16.8
+# Rate gains. ArduCopter's defaults suit the Iris; on the FireFly's long, light frame (rotors 12.5 cm
+# ahead and behind, 5.5 cm to the side) pitch and yaw respond ~2x as strongly per unit of command, and
+# with the default gains yaw oscillated at +-25 deg/s and the visual odometry drifted. Pitch and yaw
+# gains are halved. Roll (the lightest axis, ixx 0.0013 kg m^2) limit-cycled at 20 Hz, about +-1 deg,
+# with the default D gain (0.0036); 0.0015 removes it (roll-rate noise 107 -> 9 deg/s).
+ATC_RAT_RLL_D 0.0015
+ATC_RAT_PIT_P 0.07
+ATC_RAT_PIT_I 0.07
+ATC_RAT_PIT_D 0.0018
+ATC_RAT_YAW_P 0.12
+ATC_RAT_YAW_I 0.012

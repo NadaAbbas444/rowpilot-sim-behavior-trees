@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Fly the rowpilot mission with ArduPilot SITL (ArduCopter), as on the real drone:
 #   Gazebo greenhouse -> D435i -> OpenVINS -> ArduPilot EKF3 (GPS-denied) -> behaviour tree.
-# Usage: scripts/run_ardupilot_sim.sh [ardupilot_dir] [ardupilot_gazebo_dir] [openvins_dir]
+# Usage: scripts/run_ardupilot_sim.sh [ardupilot_dir] [ardupilot_gazebo_dir]
 #        HEADLESS=1 to run without the Gazebo window.
+#        VEHICLE=iris to fly the ArduPilot Iris instead of the FireFly 2 (the real drone).
 set -euo pipefail
 export PYTHONNOUSERSITE=1
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -12,6 +13,13 @@ OV_BRIDGE=${VIO_BRIDGE:-$REPO/build/vio/vio_bridge}
 PY=$REPO/.venv-sim/bin/python
 GZ=$REPO/build/gz
 OUT=$REPO/runs/ardupilot-$(date +%Y%m%d-%H%M%S)
+VEHICLE=${VEHICLE:-firefly}
+MODEL=gh_$VEHICLE
+case $VEHICLE in
+  firefly) FRAME_PARM=$GZ/firefly.parm ;;
+  iris) FRAME_PARM=$AP/Tools/autotest/default_params/gazebo-iris.parm ;;
+  *) echo "VEHICLE must be firefly or iris" >&2; exit 2 ;;
+esac
 mkdir -p "$OUT"
 
 stop_all() {
@@ -23,7 +31,7 @@ stop_all() {
 trap stop_all EXIT
 stop_all
 
-"$REPO/ardupilot/install.sh" "$GZ" "$PY" > /dev/null
+"$REPO/ardupilot/install.sh" "$GZ" "$PY" "$VEHICLE" > /dev/null
 # Keep gz-transport on loopback: with several network interfaces (Wi-Fi, docker0 ...) the GUI's
 # "starting world" message can miss the server, which then waits for it forever.
 export GZ_IP=${GZ_IP:-127.0.0.1}
@@ -59,17 +67,17 @@ for attempt in 1 2 3; do
   echo "Gazebo did not start (attempt $attempt), retrying ..."
   stop_all
 done
-echo "Starting ArduCopter SITL (log: $OUT/arducopter.log) ..."
+echo "Starting ArduCopter SITL, $VEHICLE (log: $OUT/arducopter.log) ..."
 (cd "$OUT" && "$AP/build/sitl/bin/arducopter" --model JSON --speedup 1 --slave 0 -I0 \
-  --defaults "$AP/Tools/autotest/default_params/copter.parm,$AP/Tools/autotest/default_params/gazebo-iris.parm,$GZ/gh_iris.parm" \
+  --defaults "$AP/Tools/autotest/default_params/copter.parm,$GZ/gps_denied.parm,$FRAME_PARM" \
   > "$OUT/arducopter.log" 2>&1 &)
 echo "Starting OpenVINS on the D435i (log: $OUT/openvins.log) ..."
 # Gazebo's IMU accelerometer is wrong while the drone rotates: OpenVINS gets one computed from the
 # physics (rowpilot.imu_synth), with Gazebo's gyro.
-"$PY" -u -m rowpilot.imu_synth --model gh_iris > "$OUT/imu_synth.log" 2>&1 &
-"$OV_BRIDGE" "$GZ/openvins/estimator_config.yaml" /gh_iris /rowpilot/vio/odometry /gh_iris/d435i_imu_kin \
+"$PY" -u -m rowpilot.imu_synth --model "$MODEL" > "$OUT/imu_synth.log" 2>&1 &
+"$OV_BRIDGE" "$GZ/openvins/estimator_config.yaml" "/$MODEL" /rowpilot/vio/odometry "/$MODEL/d435i_imu_kin" \
   > "$OUT/openvins.log" 2>&1 &
 sleep 5
 echo "Flying the mission (Ctrl+C to stop) ..."
-"$PY" -u -m rowpilot ardupilot --out "$OUT"
+"$PY" -u -m rowpilot ardupilot --vehicle "$VEHICLE" --out "$OUT"
 echo "Results in $OUT"

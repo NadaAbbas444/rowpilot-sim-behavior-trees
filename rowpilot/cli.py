@@ -28,7 +28,7 @@ def _dropout(s: str) -> tuple[float, float]:
 
 
 def _layout(a) -> GreenhouseLayout:
-    return GreenhouseLayout(n_lanes=a.lanes, row_length=a.length, path_width=a.path_width)
+    return GreenhouseLayout(n_lanes=a.lanes, row_length=a.length, path_width=a.path_width, closed_end=not a.open_ends)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -41,6 +41,11 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("--lanes", type=int, default=6)
         sp.add_argument("--length", type=float, default=GreenhouseLayout.row_length, help="row length (m)")
         sp.add_argument("--path-width", type=float, default=1.6, help="free lane width (m)")
+        sp.add_argument(
+            "--open-ends",
+            action="store_true",
+            help="lanes open at the far end too (default: dead ends, as in the greenhouse)",
+        )
     r = sub.choices["run"]
     r.add_argument("--seed", type=int, default=0)
     r.add_argument("--battery", type=float, default=100.0, help="start battery (%%)")
@@ -65,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = sub.choices["ardupilot"]
     ap.add_argument("--url", default="tcp:127.0.0.1:5760", help="MAVLink connection to ArduPilot SITL")
     ap.add_argument("--max-sim-time", type=float, default=900.0)
-    ap.add_argument("--home-z", type=float, default=0.195, help="body height above the floor at rest (m)")
+    ap.add_argument("--vehicle", choices=("firefly", "iris"), default="firefly", help="simulated drone")
     ap.add_argument("--out", type=Path)
     a = p.parse_args(argv)
     layout = _layout(a)
@@ -85,9 +90,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if res["outcome"] != "crashed" else 1
 
     if a.cmd == "ardupilot":
+        from .airframe import VEHICLES
         from .ardupilot import run_ardupilot
 
-        res = run_ardupilot(layout, MissionParams(), a.url, max_sim_time_s=a.max_sim_time, out=a.out, home_z=a.home_z)
+        v = VEHICLES[a.vehicle]
+        res = run_ardupilot(
+            layout,
+            MissionParams(),
+            a.url,
+            model=v.model,
+            max_sim_time_s=a.max_sim_time,
+            out=a.out,
+            home_z=v.home_z,
+            rig=v.rig,
+        )
         print(json.dumps(res, indent=1))
         return 0
 

@@ -28,7 +28,7 @@ from py_trees.common import Status
 from .control import Command
 from .layout import GreenhouseLayout
 from .mission import MissionContext, MissionParams, SweepLane, build_tree
-from .sensors import D435i, depth_to_lane_scan
+from .sensors import D435i, SensorRig, depth_to_lane_scan
 from .vehicle import VehicleState
 from .vio_link import BodyPose, VioAligner, rot_to_quat, subscribe_vio
 
@@ -322,19 +322,22 @@ def run_ardupilot(
     params: MissionParams,
     url: str = "tcp:127.0.0.1:5760",
     world: str = "greenhouse",
-    model: str = "gh_iris",
-    prefix: str = "/gh_iris",
+    model: str = "gh_firefly",
+    prefix: str | None = None,
     max_sim_time_s: float = 900.0,
     out: Path | None = None,
     tick_s: float = 0.1,
     home_z: float = 0.0,
+    rig: SensorRig | None = None,
 ) -> dict:
-    """Run the mission tree against ArduPilot SITL. Ticks every tick_s of simulation time."""
-    sensors = GazeboSensors(world, model, prefix)
-    aligner = VioAligner(layout.home, home_yaw=0.0, home_z=home_z)
+    """Run the mission tree against ArduPilot SITL. Ticks every tick_s of simulation time.
+    rig: the drone's sensor placement (see airframe.VEHICLES); prefix defaults to /<model>."""
+    rig = rig or SensorRig()
+    sensors = GazeboSensors(world, model, prefix or f"/{model}")
+    aligner = VioAligner(layout.home, home_yaw=0.0, home_z=home_z, d435i=rig.d435i)
     veh_box: list[ArduPilotVehicle] = []
     vio_node = subscribe_vio(aligner, on_pose=lambda p: veh_box and veh_box[0].send_vio(p))  # noqa: F841
-    veh = ArduPilotVehicle(layout, sensors, aligner, url)
+    veh = ArduPilotVehicle(layout, sensors, aligner, url, d435i=rig.d435i)
     veh_box.append(veh)
     print("waiting for EKF3 to use the visual odometry ...", flush=True)
     veh.wait_ready()
