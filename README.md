@@ -8,7 +8,7 @@
 
 A drone that flies the lanes between greenhouse crop rows, where GPS is denied (glass, steel and dense crop). It localizes with visual odometry, keeps itself centred in each lane using the crop rows it sees in a depth camera, and runs the mission as a **behaviour tree** that handles a low battery and lost tracking safely.
 
-Target hardware: a flight controller running PX4, a Raspberry Pi 5 companion computer on SkiffOS, an Intel RealSense depth camera (lane perception and visual odometry), a Pi camera, and a battery.
+Target hardware: a flight controller running ArduPilot (ArduCopter), a Raspberry Pi 5 companion computer on SkiffOS, an Intel RealSense D435i at the front tilted 15° down (depth for lane perception; stereo infrared + IMU for OpenVINS visual-inertial odometry), a Raspberry Pi Camera Module 3 on the left side for plant images, and a battery. No GPS, no compass.
 
 The core of this repo is the part that does not depend on a simulator or the hardware: perception, control, the behaviour tree, and a lightweight simulator that sits behind the same `Vehicle` interface PX4 will use. It runs anywhere with Python 3.10+ and is covered by tests and CI.
 
@@ -64,11 +64,48 @@ The guard is ticked before the mission on every tick, so a failing check interru
 ### What the tests check
 
 - Perception matches the true offset and heading across positions and angles, including lane entries seen from the headland, and is never confidently wrong in hard poses.
-- Full missions against ground truth: every lane swept and landed; the whole 6-lane greenhouse on one battery; strong gusts without hitting the crop; return home on a low battery; hover and resume on a short VO dropout; land in place on a long one; refusing to take off on a low battery.
+- Full missions against ground truth: every lane swept and landed; the whole 6-lane greenhouse on one battery; strong gusts (0.5 m/s rms, with the flight controller's measured delay) without hitting the crop; return home on a low battery; hover and resume on a short VO dropout; land in place on a long one; refusing to take off on a low battery.
+
+## ArduPilot SITL + Gazebo (the real drone's setup)
+
+The behaviour tree flies ArduCopter SITL in the Gazebo greenhouse, with the real drone's sensors and estimator chain:
+Gazebo D435i → OpenVINS (no ROS) → MAVLink ODOMETRY → ArduPilot EKF3 (ExternalNav, GPS-denied) → GUIDED velocity targets from the tree.
+
+| Piece | File |
+|---|---|
+| `gh_iris`: ArduPilot Iris + RealSense D435i (front, 15° down) + Pi Camera Module 3 (left), generated from one sensor description | `rowpilot/sensors.py` |
+| Greenhouse world: tomato rows, pipe rails, posts, sticky tape, ground cover, glass facades | `rowpilot/gazebo_world.py`, `rowpilot/greenhouse_assets.py` |
+| OpenVINS config for the D435i | `rowpilot/openvins_config.py` |
+| VIO bridge: D435i stereo IR + IMU → OpenVINS → odometry | `vio_bridge/` |
+| OpenVINS pose → greenhouse frame | `rowpilot/vio_link.py` |
+| D435i accelerometer computed from the physics (simulation only, see below) | `rowpilot/imu_synth.py` |
+| `ArduPilotVehicle` (MAVLink: ODOMETRY to EKF3, GUIDED take-off and velocity targets, LAND mode) | `rowpilot/ardupilot.py` |
+| ArduCopter parameters for GPS-denied flight | `ardupilot/gh_iris.parm` |
+
+```bash
+./scripts/setup_ardupilot_sim.sh                                 # once: ArduPilot SITL, ardupilot_gazebo, OpenVINS, the bridge, .venv-sim
+./scripts/run_ardupilot_sim.sh ~/ardupilot ~/ardupilot_gazebo    # opens Gazebo and flies; results in runs/ardupilot-<time>/
+```
+
+**Result** (6 lanes, 13.3 m rows, OpenVINS → EKF3, scored against Gazebo ground truth): every lane swept, **48–112 mm RMS from the lane centre, 0.31 m worst case**, home through the headland, landed by ArduCopter's LAND mode, 239 s. OpenVINS + EKF3 position error in flight: 0.20 m mean, 0.54 m worst.
+
+![ArduPilot SITL + OpenVINS in Gazebo: six lanes swept, back home and landed](docs/ardupilot-gazebo-run.png)
+
+Each run folder has `gazebo.log`, `arducopter.log`, `openvins.log`, `imu_synth.log`, `events.jsonl`, `trace.json` (estimate, ground truth, lane estimate and commands at 10 Hz), `summary.json` and `path.png`. `HEADLESS=1` runs without the Gazebo window; `GPU=0` keeps the default OpenGL renderer.
+
+Things learned getting it to fly, all handled in the scripts and code:
+- **GPU rendering.** On a hybrid-graphics laptop OpenGL falls back to llvmpipe (CPU) and the five cameras slow Gazebo to 0.004× real time. The run script uses NVIDIA PRIME offload when there is an NVIDIA GPU: 1.0× real time.
+- **1 kHz physics.** In SITL the IMU rate is the physics rate, and ArduCopter's pre-arm check needs it ≥ 1.8 × its 400 Hz loop: 400 Hz physics never arms.
+- **gz-transport on loopback** (`GZ_IP=127.0.0.1`): with several network interfaces (Wi-Fi, docker0) the GUI's "starting world" message can miss the server, which then waits forever. Gazebo also sometimes segfaults at start-up (a getenv race in gz-transport); the run script restarts it.
+- **Take-off.** A GUIDED velocity target cancels ArduCopter's NAV_TAKEOFF climb, and on the ground ArduCopter does not climb on velocity targets (it disarms). The vehicle holds velocity targets back until the take-off is airborne.
+- **Gazebo's IMU accelerometer is wrong while the drone rotates** (0.2–0.6 m/s² sideways in yaw turns, while the gyro and the images agree with the true motion). OpenVINS integrated it into a false velocity and diverged in every turn. Gazebo's gyro is kept; the accelerometer is computed from the sensor link's physics pose (1 kHz), with BMI055-like noise and bias. With it, OpenVINS stays within 0.11 m of ground truth through 0.8 rad/s turns. This is a simulator fix only; the real D435i IMU goes straight to OpenVINS.
+- **Visual features.** The floor is tiled ground cover with dirt and leaf litter, and glass facades with columns and glazing bars close the greenhouse, so the cameras have something to track in the headlands. SDF's default metalness (0.5) renders a floor dark and featureless; it is set to 0.
+- **ZUPT only before take-off.** Hovering or creeping, the image barely changes and OpenVINS's zero-velocity test passes for a drone that is not standing still.
+- **The flight controller's response.** ArduCopter follows GUIDED velocity targets with ~0.5 s dead time and a 0.3 s lag (its jerk and acceleration limits). The Python simulator now models that, and the lane and waypoint controllers are tuned for it: the old gains made the drone swing across the lane. With this delay, the drone holds the lanes in gusts up to 0.5 m/s rms (20/20 runs); at 0.8 m/s most runs touch the crop.
 
 ## PX4 SITL + Gazebo
 
-The same behaviour tree flies the real PX4 flight stack in Gazebo, through a `Vehicle` implementation over MAVSDK. No GPS and no magnetometer: PX4's EKF2 fuses only the vision odometry, as on the real drone.
+The older PX4 path (kept, not the priority: the real drone runs ArduPilot). The same behaviour tree flies the PX4 flight stack in Gazebo, through a `Vehicle` implementation over MAVSDK. No GPS and no magnetometer: PX4's EKF2 fuses only the vision odometry, as on the real drone.
 
 | Piece | File |
 |---|---|
