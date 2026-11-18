@@ -34,7 +34,7 @@ Each run writes `events.jsonl` (every node's status changes and log lines), `tra
 
 ## Behaviour tree editor
 
-Draw or change the tree in the browser, run it in the simulator and watch every node live: running nodes light up, each node keeps its own log, and a map shows the flight. React + React Flow page, FastAPI server running the same tree code. **[docs/editor.md](docs/editor.md)**
+Draw or change the tree in the browser, run it and watch every node live: running nodes light up, each node keeps its own log, and a map shows the flight. Run it in the fast Python simulator, or in the full chain (Gazebo + ArduPilot SITL + OpenVINS), with ArduPilot's, EKF3's and OpenVINS's messages in the log next to the tree's. React + React Flow page, FastAPI server running the same tree code. **[docs/editor.md](docs/editor.md)**
 
 ```bash
 pip install -e ".[editor]"

@@ -4,6 +4,9 @@
 # Usage: scripts/run_ardupilot_sim.sh [ardupilot_dir] [ardupilot_gazebo_dir]
 #        HEADLESS=1 to run without the Gazebo window.
 #        VEHICLE=iris to fly the ArduPilot Iris instead of the FireFly 2 (the real drone).
+#        Used by the behaviour tree editor: TREE=<graph.json> flies that tree, STREAM=1 prints the run
+#        as JSON lines, OUT_DIR=<folder> for the results, GREENHOUSE_ARGS="--lanes 2 ..." for the
+#        greenhouse (the world and the mission).
 set -euo pipefail
 export PYTHONNOUSERSITE=1
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -12,7 +15,7 @@ AG=${2:-$HOME/ardupilot_gazebo}
 OV_BRIDGE=${VIO_BRIDGE:-$REPO/build/vio/vio_bridge}
 PY=$REPO/.venv-sim/bin/python
 GZ=$REPO/build/gz
-OUT=$REPO/runs/ardupilot-$(date +%Y%m%d-%H%M%S)
+OUT=${OUT_DIR:-$REPO/runs/ardupilot-$(date +%Y%m%d-%H%M%S)}
 VEHICLE=${VEHICLE:-firefly}
 MODEL=gh_$VEHICLE
 case $VEHICLE in
@@ -31,7 +34,7 @@ stop_all() {
 trap stop_all EXIT
 stop_all
 
-"$REPO/ardupilot/install.sh" "$GZ" "$PY" "$VEHICLE" > /dev/null
+GREENHOUSE_ARGS=${GREENHOUSE_ARGS:-} "$REPO/ardupilot/install.sh" "$GZ" "$PY" "$VEHICLE" > /dev/null
 # Keep gz-transport on loopback: with several network interfaces (Wi-Fi, docker0 ...) the GUI's
 # "starting world" message can miss the server, which then waits for it forever.
 export GZ_IP=${GZ_IP:-127.0.0.1}
@@ -88,5 +91,7 @@ if [ "${HEADLESS:-0}" != 1 ]; then
 fi
 sleep 5
 echo "Flying the mission (Ctrl+C to stop) ..."
-"$PY" -u -m rowpilot ardupilot --vehicle "$VEHICLE" --out "$OUT"
+# shellcheck disable=SC2086
+"$PY" -u -m rowpilot ardupilot --vehicle "$VEHICLE" --out "$OUT" ${GREENHOUSE_ARGS:-} \
+  ${TREE:+--tree "$TREE"} ${STREAM:+--stream}
 echo "Results in $OUT"

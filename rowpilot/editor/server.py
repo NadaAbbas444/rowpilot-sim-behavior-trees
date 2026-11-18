@@ -3,6 +3,7 @@
     GET  /api/node-types               the node palette: types, categories, parameters
     GET  /api/default-tree             the mission tree (mission.build_tree) as a graph
     GET  /api/layout                   greenhouse geometry and the planned path, for the map
+    GET  /api/simulators               which simulators can run here (Gazebo needs the full setup)
     POST /api/validate                 {graph, settings} -> {errors: [{node, message}]}
     POST /api/runs                     {graph, settings} -> run info (422 with errors if the graph is wrong)
     GET  /api/runs, /api/runs/{id}     run info and summary
@@ -20,7 +21,7 @@ import re
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -29,7 +30,7 @@ from pydantic import BaseModel, Field
 
 from ..layout import GreenhouseLayout
 from .nodes import GRAPH_VERSION, default_graph, node_types, validate
-from .runs import RunManager, Settings
+from .runs import GazeboSetup, RunManager, Settings
 
 WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
 TREE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
@@ -55,6 +56,9 @@ class Graph(BaseModel):
 
 
 class SettingsModel(BaseModel):
+    simulator: Literal["python", "gazebo"] = "python"
+    vehicle: Literal["firefly", "iris"] = "firefly"
+    gazebo_window: bool = True
     lanes: int = Field(6, ge=1, le=20)
     open_ends: bool = False
     row_length: float = Field(GreenhouseLayout.row_length, ge=3, le=100)
@@ -97,8 +101,10 @@ def layout_info(lay: GreenhouseLayout) -> dict:
     }
 
 
-def create_app(trees_dir: Path | str = "trees", runs: RunManager | None = None) -> FastAPI:
-    manager = runs or RunManager()
+def create_app(
+    trees_dir: Path | str = "trees", runs: RunManager | None = None, gazebo: GazeboSetup | None = None
+) -> FastAPI:
+    manager = runs or RunManager(gazebo=gazebo)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -132,6 +138,10 @@ def create_app(trees_dir: Path | str = "trees", runs: RunManager | None = None) 
             GreenhouseLayout(n_lanes=lanes, row_length=row_length, path_width=path_width, closed_end=not open_ends)
         )
 
+    @app.get("/api/simulators")
+    def get_simulators() -> dict:
+        return manager.simulators()
+
     @app.get("/api/settings/defaults")
     def get_settings_defaults() -> dict:
         return asdict(Settings())
@@ -148,6 +158,8 @@ def create_app(trees_dir: Path | str = "trees", runs: RunManager | None = None) 
             raise HTTPException(422, detail={"errors": errors})
         try:
             run = manager.start(graph, settings)
+        except ValueError as e:  # the Gazebo simulation is not set up
+            raise HTTPException(409, detail=str(e)) from e
         except RuntimeError as e:
             raise HTTPException(429, detail=str(e)) from e
         return run.info()

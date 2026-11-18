@@ -32,6 +32,31 @@ def _layout(a) -> GreenhouseLayout:
     return GreenhouseLayout(n_lanes=a.lanes, row_length=a.length, path_width=a.path_width, closed_end=not a.open_ends)
 
 
+def _stream(kind: str, **data) -> None:
+    """One message for the editor (rowpilot/editor/runs.py reads these from the run's output)."""
+    print("@rowpilot " + json.dumps({"kind": kind, **data}, default=float), flush=True)
+
+
+def _stream_hooks() -> dict:
+    """run_ardupilot callbacks that stream to the editor, and 'stop' on stdin to end the run."""
+    import _thread
+    import threading
+
+    def watch_stdin() -> None:
+        for line in sys.stdin:
+            if line.strip() == "stop":
+                _stream("event", type="system", source="editor", node="editor", msg="stop requested: landing")
+                _thread.interrupt_main()  # KeyboardInterrupt: land in place, end the run
+                return
+
+    threading.Thread(target=watch_stdin, daemon=True).start()
+    return {
+        "on_event": lambda ev: _stream("event", **ev),
+        "on_tick": lambda row: _stream("tick", **row),
+        "say": lambda source, msg, t=None: _stream("event", t=t, type="system", source=source, node=source, msg=msg),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="rowpilot", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -73,24 +98,37 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-sim-time", type=float, default=900.0)
     ap.add_argument("--vehicle", choices=("firefly", "iris"), default="firefly", help="simulated drone")
     ap.add_argument("--out", type=Path)
+    ap.add_argument("--tree", type=Path, help="fly this tree (a graph saved by the editor) instead of the mission")
+    ap.add_argument(
+        "--stream",
+        action="store_true",
+        help="print every event, tick and flight-stack message as a JSON line for the editor; "
+        "a line 'stop' on stdin lands the drone and ends the run",
+    )
     ed = sub.add_parser("editor", help="the behaviour tree editor (web page + API)")
     ed.add_argument("--host", default="127.0.0.1")
     ed.add_argument("--port", type=int, default=8000)
     ed.add_argument("--trees", type=Path, default=Path("trees"), help="folder for saved trees")
+    ed.add_argument("--ardupilot", type=Path, default=Path.home() / "ardupilot", help="for Gazebo runs")
+    ed.add_argument("--ardupilot-gazebo", type=Path, default=Path.home() / "ardupilot_gazebo", help="for Gazebo runs")
     a = p.parse_args(argv)
 
     if a.cmd == "editor":
         try:
             import uvicorn
 
+            from .editor.runs import GazeboSetup
             from .editor.server import WEB_DIST, create_app
         except ImportError:
             print('the editor needs its extras: pip install -e ".[editor]"', file=sys.stderr)
             return 1
         if not (WEB_DIST / "index.html").is_file():
             print(f"web page not built ({WEB_DIST}): cd web && npm ci && npm run build; API only", file=sys.stderr)
+        gazebo = GazeboSetup(ardupilot=a.ardupilot, ardupilot_gazebo=a.ardupilot_gazebo)
+        missing = gazebo.missing()
+        print("Gazebo runs: " + ("ready" if not missing else "not available, missing " + "; ".join(missing)))
         print(f"rowpilot editor on http://{a.host}:{a.port}")
-        uvicorn.run(create_app(a.trees), host=a.host, port=a.port, log_level="warning")
+        uvicorn.run(create_app(a.trees, gazebo=gazebo), host=a.host, port=a.port, log_level="warning")
         return 0
 
     layout = _layout(a)
@@ -114,6 +152,14 @@ def main(argv: list[str] | None = None) -> int:
         from .ardupilot import run_ardupilot
 
         v = VEHICLES[a.vehicle]
+        hooks: dict = {}
+        if a.tree:
+            from .editor.nodes import build_from_graph
+
+            graph = json.loads(a.tree.read_text())
+            hooks["tree_factory"] = lambda ctx: build_from_graph(graph, ctx)
+        if a.stream:
+            hooks.update(_stream_hooks())
         res = run_ardupilot(
             layout,
             MissionParams(),
@@ -123,8 +169,12 @@ def main(argv: list[str] | None = None) -> int:
             out=a.out,
             home_z=v.home_z,
             rig=v.rig,
+            **hooks,
         )
-        print(json.dumps(res, indent=1))
+        if a.stream:
+            _stream("summary", **res)
+        else:
+            print(json.dumps(res, indent=1))
         return 0
 
     if a.cmd == "tree":

@@ -20,9 +20,11 @@ import json
 import math
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
+import py_trees
 from py_trees.common import Status
 
 from .control import Command
@@ -34,6 +36,13 @@ from .vio_link import BodyPose, VioAligner, rot_to_quat, subscribe_vio
 
 GUIDED, LAND = 4, 9  # ArduCopter custom modes
 VIO_STALE_S = 0.5
+Say = Callable[..., None]  # say(source, message, t=sim time): what the flight stack reports, besides the tree
+
+
+def print_say(source: str, msg: str, t: float | None = None) -> None:
+    print(f"[{source}] {msg}", flush=True)
+
+
 # Matrix taking ENU vectors to NED, and FLU body vectors to FRD.
 ENU_TO_NED = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
 FLU_TO_FRD = np.diag([1.0, -1.0, -1.0])
@@ -87,13 +96,17 @@ class ArduPilotVehicle:
         aligner: VioAligner,
         url: str = "tcp:127.0.0.1:5760",
         d435i: D435i | None = None,
+        say: Say = print_say,
     ):
         from pymavlink import mavutil
+
+        self.say = say
 
         self.mavutil, self.layout, self.sensors, self.aligner = mavutil, layout, sensors, aligner
         self.cam = (d435i or D435i()).depth()
         self.conn = mavutil.mavlink_connection(url, source_system=200, source_component=191)
         self.conn.wait_heartbeat(timeout=60)
+        say("mavlink", f"connected to ArduCopter ({url})")
         self.msgs: dict[str, object] = {}
         self._took_off = self._landing = False
         self._takeoff_alt = 0.0
@@ -129,7 +142,7 @@ class ArduPilotVehicle:
             with self._lock:
                 self.msgs[t] = m
                 if t == "STATUSTEXT":
-                    print(f"[ardupilot] {m.text}", flush=True)
+                    self.say("ardupilot", m.text)
                 if t == "COMMAND_ACK":
                     self.msgs[f"ACK_{m.command}"] = m
 
@@ -191,6 +204,8 @@ class ArduPilotVehicle:
                 self.conn.target_system, int(47.0 * 1e7), int(15.0 * 1e7), 350_000, int(time.time() * 1e6)
             )
             self._origin_set = self._get("GPS_GLOBAL_ORIGIN") is not None
+            if self._origin_set:
+                self.say("ekf", "EKF origin set (needed for GUIDED flight without GPS)")
 
     # ---- Vehicle interface ---------------------------------------------------------------------
     def state(self) -> VehicleState:
@@ -226,14 +241,23 @@ class ArduPilotVehicle:
     def wait_ready(self, timeout_s: float = 300.0) -> None:
         """Until EKF3 has a horizontal position from the VIO (needs the EKF origin too)."""
         end = time.monotonic() + timeout_s
+        self.say("ekf", "waiting for EKF3 to use the visual odometry ...")
+        seen_vio = False
         while time.monotonic() < end:
             ekf = self._get("EKF_STATUS_REPORT")
             lp, vio = self._get("LOCAL_POSITION_NED"), self.aligner.get()
+            if vio is not None and not seen_vio:
+                seen_vio = True
+                x, y, z = vio.p
+                self.say(
+                    "vio", f"first OpenVINS pose: ({x:.2f}, {y:.2f}, {z:.2f}) m in the greenhouse, sent to ArduPilot"
+                )
             pos_ok = ekf is not None and ekf.flags & self.mavutil.mavlink.EKF_POS_HORIZ_ABS
             if pos_ok and self._origin_set and lp is not None and vio is not None:
                 # Standing on the ground: VIO knows the true height of the body above the floor,
                 # EKF3 reports height relative to its start. Remember the difference once.
                 self._z_offset = -lp.z - vio.p[2]
+                self.say("ekf", f"EKF3 has a position from the visual odometry: ({lp.y:.2f}, {lp.x:.2f}) m")
                 return
             time.sleep(0.5)
         raise TimeoutError("ArduPilot EKF3 has no position from the visual odometry")
@@ -249,19 +273,27 @@ class ArduPilotVehicle:
         then climbs to the mission altitude with velocity targets."""
         end = self.sensors.sim_t + timeout_s
         mav = self.mavutil.mavlink
+        tries = 0
         while self.sensors.sim_t < end:
-            if self.set_mode(GUIDED) and self._command(
-                mav.MAV_CMD_COMPONENT_ARM_DISARM, 1, wait_ack=True, timeout=30.0
-            ):
+            if not self.set_mode(GUIDED):
+                self.say("mavlink", "GUIDED mode refused, trying again")
+            elif self._command(mav.MAV_CMD_COMPONENT_ARM_DISARM, 1, wait_ack=True, timeout=30.0):
+                self.say("mavlink", "GUIDED mode, motors armed")
                 self._took_off = self._command(
                     mav.MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, takeoff_alt, wait_ack=True, timeout=30.0
                 )
                 self._takeoff_alt, self._climbing = takeoff_alt, self._took_off
-                if not self._took_off:
-                    print("take-off refused", flush=True)
+                self.say(
+                    "mavlink",
+                    f"take-off to {takeoff_alt:.1f} m accepted" if self._took_off else "take-off refused",
+                )
                 return self._took_off
+            else:
+                tries += 1
+                if tries == 1:
+                    self.say("mavlink", "arming refused by the pre-arm checks, retrying (see ArduPilot's messages)")
             time.sleep(1.0)
-        print("arming refused", flush=True)
+        self.say("mavlink", "arming refused")
         return False
 
     def disarm(self) -> None:
@@ -275,6 +307,8 @@ class ArduPilotVehicle:
     def land(self) -> None:
         if not self._landing:
             self._landing = self.set_mode(LAND)
+            if self._landing:
+                self.say("mavlink", "LAND mode: ArduCopter descends and disarms on touchdown")
 
     def send(self, cmd: Command) -> None:
         if self._landing:
@@ -329,28 +363,47 @@ def run_ardupilot(
     tick_s: float = 0.1,
     home_z: float = 0.0,
     rig: SensorRig | None = None,
+    *,
+    tree_factory: Callable[[MissionContext], py_trees.behaviour.Behaviour] = build_tree,
+    on_event: Callable[[dict], None] | None = None,
+    on_tick: Callable[[dict], bool | None] | None = None,
+    say: Say = print_say,
 ) -> dict:
     """Run the mission tree against ArduPilot SITL. Ticks every tick_s of simulation time.
-    rig: the drone's sensor placement (see airframe.VEHICLES); prefix defaults to /<model>."""
+    rig: the drone's sensor placement (see airframe.VEHICLES); prefix defaults to /<model>.
+    tree_factory builds another tree (e.g. one drawn in the editor). on_event gets the tree's events
+    (as runner.run_mission), on_tick every tick's state (return False to land and stop), say what the
+    flight stack reports (ArduPilot's messages, arming, EKF3, VIO)."""
     rig = rig or SensorRig()
     sensors = GazeboSensors(world, model, prefix or f"/{model}")
     aligner = VioAligner(layout.home, home_yaw=0.0, home_z=home_z, d435i=rig.d435i)
     veh_box: list[ArduPilotVehicle] = []
     vio_node = subscribe_vio(aligner, on_pose=lambda p: veh_box and veh_box[0].send_vio(p))  # noqa: F841
-    veh = ArduPilotVehicle(layout, sensors, aligner, url, d435i=rig.d435i)
+    user_say = say
+
+    def say(source: str, msg: str) -> None:  # noqa: F811 - stamp the flight stack's messages with sim time
+        user_say(source, msg, t=round(sensors.sim_t, 2))
+
+    veh = ArduPilotVehicle(layout, sensors, aligner, url, d435i=rig.d435i, say=say)
     veh_box.append(veh)
-    print("waiting for EKF3 to use the visual odometry ...", flush=True)
     veh.wait_ready()
     events, trace = [], []
+    ids: dict[str, str] = {}
 
     def emit(ev: dict) -> None:
+        if ev["node"] in ids:
+            ev["id"] = ids[ev["node"]]
         events.append(ev)
-        if ev["type"] in ("log", "end"):
+        if on_event:
+            on_event(ev)
+        elif ev["type"] in ("log", "end"):
             print(f"{ev['t']:7.1f}s  {ev['node']:<24} {ev['msg']}", flush=True)
 
     ctx = MissionContext(veh, layout, params, dt=tick_s)
     ctx.log_fn = lambda node, msg: emit({"t": round(ctx.s.t, 2), "type": "log", "node": node, "msg": msg})
-    root = build_tree(ctx)
+    root = tree_factory(ctx)
+    ids.update({n.name: n.graph_id for n in root.iterate() if getattr(n, "graph_id", None) is not None})
+    vio_was_ok = True
     last: dict[str, Status] = {}
     lane_sq: dict[int, list[float]] = {}
     outcome, hit_crop, was_armed = "timeout", False, False
@@ -391,6 +444,25 @@ def run_ardupilot(
                 ):
                     lane_sq.setdefault(tip.lane_idx, []).append((tr[1] - layout.lane_center_y(tip.lane_idx)) ** 2)
             trace.append(row)
+            if s.vo_healthy != vio_was_ok:
+                vio_was_ok = s.vo_healthy
+                say("vio", "OpenVINS tracking again" if s.vo_healthy else "OpenVINS estimate stale or lost")
+            if on_tick:
+                tick = {
+                    "t": row["t"],
+                    "x": row.get("x", s.x),
+                    "y": row.get("y", s.y),
+                    "z": s.z,
+                    "yaw": row.get("yaw", s.yaw),
+                    "est_x": s.x,
+                    "est_y": s.y,
+                    "battery": s.battery_pct,
+                    "vo_ok": s.vo_healthy,
+                    "armed": s.armed,
+                    "node": row["node"],
+                }
+                if on_tick(tick) is False:
+                    raise KeyboardInterrupt
             was_armed |= s.armed
             if was_armed and not s.armed and not veh.landing_requested:
                 outcome = "crashed: ArduPilot disarmed in flight"  # e.g. its crash check (attitude error)
@@ -413,7 +485,7 @@ def run_ardupilot(
         "lane_rms_error_m": {k: round(math.sqrt(sum(v) / len(v)), 3) for k, v in sorted(lane_sq.items())},
         "max_lane_error_m": round(max((math.sqrt(max(v)) for v in lane_sq.values()), default=0.0), 3),
     }
-    emit({"t": round(ctx.s.t, 2), "type": "end", "node": "Root", "msg": outcome})
+    emit({"t": round(ctx.s.t, 2), "type": "end", "node": root.name, "msg": outcome})
     veh.close()
     if out:
         out.mkdir(parents=True, exist_ok=True)

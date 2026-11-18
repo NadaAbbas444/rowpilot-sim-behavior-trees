@@ -50,7 +50,12 @@ export interface GraphIssue {
 
 export type Status = 'RUNNING' | 'SUCCESS' | 'FAILURE' | 'INVALID';
 
+export type Simulator = 'python' | 'gazebo';
+
 export interface Settings {
+  simulator: Simulator;
+  vehicle: 'firefly' | 'iris';
+  gazebo_window: boolean;
   lanes: number;
   open_ends: boolean;
   row_length: number;
@@ -68,8 +73,9 @@ export interface Settings {
 export interface EventMsg {
   kind: 'event';
   t: number;
-  type: 'status' | 'log' | 'end';
+  type: 'status' | 'log' | 'end' | 'system';
   node: string;
+  source?: string; // system messages: ardupilot, mavlink, ekf, vio, sim, setup, editor
   id?: string;
   status?: Status;
   msg?: string;
@@ -120,6 +126,8 @@ export interface LayoutInfo {
   lane_centers_y: number[];
   planned_route: [number, number][];
 }
+
+export type Simulators = Record<Simulator, { available: boolean; missing: string[] }>;
 
 export interface RunInfo {
   id: string;

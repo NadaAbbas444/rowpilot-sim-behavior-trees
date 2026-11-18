@@ -18,7 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api, followRun } from './api';
 import BTNodeView, { CanvasContext, type CanvasInfo } from './components/BTNodeView';
 import Inspector from './components/Inspector';
-import LogPanel from './components/LogPanel';
+import LogPanel, { SOURCE_LABEL } from './components/LogPanel';
 import MapView from './components/MapView';
 import Palette, { DRAG_TYPE } from './components/Palette';
 import RunPanel from './components/RunPanel';
@@ -37,7 +37,7 @@ import {
   type BTNode,
 } from './graph';
 import { applyMessages, formatTime, idleRun, startRun, type RunView } from './runState';
-import type { Graph, GraphIssue, LayoutInfo, NodeTypeSpec, RunMessage, Settings } from './types';
+import type { Graph, GraphIssue, LayoutInfo, NodeTypeSpec, RunMessage, Settings, Simulators } from './types';
 
 const nodeTypes = { bt: BTNodeView };
 const SPEEDS: [number, string][] = [
@@ -84,6 +84,7 @@ function Editor() {
   const [saved, setSaved] = useState<string[]>([]);
   const [toast, setToast] = useState<{ text: string; bad?: boolean } | null>(null);
   const [ready, setReady] = useState(false);
+  const [simulators, setSimulators] = useState<Simulators | null>(null);
   const pending = useRef<RunMessage[]>([]);
   const unfollow = useRef<(() => void) | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -125,10 +126,12 @@ function Editor() {
   useEffect(() => {
     (async () => {
       try {
-        const [types, defaults] = await Promise.all([api.nodeTypes(), api.settingsDefaults()]);
+        const [types, defaults, sims] = await Promise.all([api.nodeTypes(), api.settingsDefaults(), api.simulators()]);
+        setSimulators(sims);
         const sp = new Map(types.map((s) => [s.type, s]));
         setSpecList(types);
         const s = { ...defaults, ...(store.get<Partial<Settings>>('rowpilot.settings') ?? {}) };
+        if (s.simulator === 'gazebo' && !sims.gazebo.available) s.simulator = 'python';
         setSettings(s);
         const last = store.get<Graph>('rowpilot.graph');
         if (last?.nodes?.length) loadGraph(last, sp, store.get<string[]>('rowpilot.collapsed') ?? []);
@@ -191,6 +194,7 @@ function Editor() {
   useEffect(() => () => unfollow.current?.(), []);
 
   const running = run.phase === 'running';
+  const gazeboSim = settings?.simulator === 'gazebo';
 
   const startTheRun = async () => {
     if (!settings) return;
@@ -473,12 +477,20 @@ function Editor() {
           </button>
         </div>
         <div className="group run-group">
+          <button
+            className={`sim-badge ${gazeboSim ? 'gz' : ''}`}
+            onClick={() => setTab('run')}
+            title="the simulator the next run uses (change it in Run settings)"
+          >
+            {gazeboSim ? 'Gazebo + ArduPilot' : 'Python sim'}
+          </button>
           <label className="speed">
             speed
             <select
-              value={settings?.speed ?? 20}
+              value={gazeboSim ? 1 : (settings?.speed ?? 20)}
               onChange={(e) => settings && setSettings({ ...settings, speed: Number(e.target.value) })}
-              disabled={running}
+              disabled={running || gazeboSim}
+              title={gazeboSim ? 'Gazebo runs in real time' : 'simulated seconds per real second'}
             >
               {SPEEDS.map(([v, l]) => (
                 <option key={v} value={v}>
@@ -585,12 +597,21 @@ function Editor() {
               }}
             />
           )}
-          {tab === 'run' && settings && <RunPanel settings={settings} onChange={setSettings} run={run} />}
+          {tab === 'run' && settings && (
+            <RunPanel settings={settings} onChange={setSettings} run={run} simulators={simulators} />
+          )}
         </div>
       </aside>
 
       <footer className="statusbar">
-        <span className={`phase ph-${run.phase}`}>{run.phase === 'idle' ? 'ready' : run.phase}</span>
+        <span className={`phase ph-${run.phase}`}>
+          {run.phase === 'idle' ? 'ready' : run.phase === 'running' && !last ? 'starting' : run.phase}
+        </span>
+        {running && !last && run.lastSystem && (
+          <span className="sys">
+            {SOURCE_LABEL[run.lastSystem.source ?? ''] ?? run.lastSystem.source}: {run.lastSystem.msg}
+          </span>
+        )}
         {last && (
           <>
             <span>t {formatTime(last.t)}</span>

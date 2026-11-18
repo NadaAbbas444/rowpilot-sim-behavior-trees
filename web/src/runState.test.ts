@@ -57,3 +57,18 @@ it('formats simulated time', () => {
   expect(formatTime(0)).toBe('0:00.0');
   expect(formatTime(371.25)).toBe('6:11.3');
 });
+
+it('keeps what the flight stack says, with its source', () => {
+  const v = applyMessages(startRun('g'), [
+    { kind: 'event', t: 0, type: 'system', node: 'setup', source: 'setup', msg: 'Starting Gazebo ...' },
+    { kind: 'event', t: 12.4, type: 'system', node: 'ardupilot', source: 'ardupilot', msg: 'EKF3 IMU0 is using external nav data' },
+    { kind: 'event', t: 18, type: 'system', node: 'mavlink', source: 'mavlink', msg: 'GUIDED mode, motors armed' },
+  ]);
+  expect(v.logs.map((l) => [l.kind, l.source])).toEqual([
+    ['system', 'setup'],
+    ['system', 'ardupilot'],
+    ['system', 'mavlink'],
+  ]);
+  expect(v.lastSystem!.msg).toBe('GUIDED mode, motors armed');
+  expect(v.status).toEqual({});
+});

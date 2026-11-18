@@ -1,4 +1,6 @@
 import copy
+import time
+from pathlib import Path
 
 import pytest
 
@@ -276,3 +278,114 @@ def test_web_page_and_unknown_api_paths(client):
         assert client.get("/some/route").status_code == 200  # the page handles its own routes
         assert client.get("/../pyproject.toml").text == client.get("/").text
     assert client.get("/api/nothing-here").status_code == 404
+
+
+# ---- Gazebo runs (with a stand-in for scripts/run_ardupilot_sim.sh) -----------------------------------
+FAKE_SIM = Path(__file__).parent / "data" / "fake_run_ardupilot_sim.sh"  # stands in for the run script
+
+
+@pytest.fixture
+def gz_client(tmp_path):
+    from rowpilot.editor.runs import GazeboSetup
+
+    setup = GazeboSetup(script=FAKE_SIM, runs_dir=tmp_path / "runs", check_tools=False)
+    with TestClient(create_app(trees_dir=tmp_path / "trees", gazebo=setup)) as c:
+        yield c
+
+
+def stream_all(client, run_id):
+    with client.websocket_connect(f"/api/runs/{run_id}/stream") as ws:
+        msgs = []
+        while not msgs or msgs[-1]["kind"] != "end":
+            msgs += ws.receive_json()
+    return msgs
+
+
+def test_gazebo_run_streams_the_flight_stack_and_the_tree(gz_client):
+    assert gz_client.get("/api/simulators").json()["gazebo"]["available"]
+    g = gz_client.get("/api/default-tree", params={"lanes": 2}).json()
+    settings = {"simulator": "gazebo", "lanes": 2, "gazebo_window": False, "vehicle": "iris"}
+    run = gz_client.post("/api/runs", json={"graph": g, "settings": settings}).json()
+    assert run["simulator"] == "gazebo"
+    msgs = stream_all(gz_client, run["id"])
+    system = [(m["source"], m["msg"]) for m in msgs if m["kind"] == "event" and m["type"] == "system"]
+    texts = " | ".join(f"{s}: {t}" for s, t in system)
+    assert "setup: Starting Gazebo" in texts
+    assert "--lanes 2" in texts and "window: 1" in texts and "vehicle: iris" in texts  # settings reach the script
+    assert "vio: OpenVINS initialised" in texts
+    assert texts.count("OpenVINS waiting to initialise") == 1  # repeated log lines shown once
+    assert "mavlink: GUIDED mode, motors armed" in texts and "ekf: EKF3 has a position" in texts
+    takeoff = next(n["id"] for n in g["nodes"] if n["name"] == "Takeoff")
+    assert any(
+        m["kind"] == "event" and m.get("id") == takeoff and m["status"] == "RUNNING" for m in msgs if "status" in m
+    )
+    assert sum(m["kind"] == "tick" for m in msgs) == 3
+    assert msgs[-1]["status"] == "finished" and msgs[-1]["summary"]["duration_s"] == 20.5
+    # a system line after the ticks carries the simulation time
+    assert next(m for m in msgs if m.get("source") == "setup" and m["msg"].startswith("Results"))["t"] == 18.3
+
+
+def test_gazebo_run_stops_by_landing(gz_client, monkeypatch):
+    monkeypatch.setenv("FAKE_WAIT_FOR_STOP", "1")
+    g = gz_client.get("/api/default-tree", params={"lanes": 1}).json()
+    run = gz_client.post("/api/runs", json={"graph": g, "settings": {"simulator": "gazebo", "lanes": 1}}).json()
+    with gz_client.websocket_connect(f"/api/runs/{run['id']}/stream") as ws:
+        msgs = []
+        while not any(m["kind"] == "tick" for m in msgs):
+            msgs += ws.receive_json()
+        # one Gazebo run at a time
+        assert (
+            gz_client.post("/api/runs", json={"graph": g, "settings": {"simulator": "gazebo", "lanes": 1}}).status_code
+            == 429
+        )
+        gz_client.post(f"/api/runs/{run['id']}/stop")
+        while msgs[-1]["kind"] != "end":
+            msgs += ws.receive_json()
+    assert any(m.get("msg") == "stop requested: landing" for m in msgs)
+    assert msgs[-1]["status"] == "stopped" and msgs[-1]["summary"]["outcome"].startswith("stopped")
+
+
+def test_gazebo_needs_its_setup(tmp_path):
+    from rowpilot.editor.runs import GazeboSetup
+
+    setup = GazeboSetup(ardupilot=tmp_path / "none", ardupilot_gazebo=tmp_path / "none2")
+    with TestClient(create_app(trees_dir=tmp_path / "trees", gazebo=setup)) as c:
+        sims = c.get("/api/simulators").json()
+        assert sims["python"]["available"] and not sims["gazebo"]["available"]
+        assert any("ArduCopter" in m for m in sims["gazebo"]["missing"])
+        g = c.get("/api/default-tree", params={"lanes": 1}).json()
+        r = c.post("/api/runs", json={"graph": g, "settings": {"simulator": "gazebo", "lanes": 1}})
+        assert r.status_code == 409 and "not set up" in r.json()["detail"]
+
+
+def test_python_runs_say_which_simulator_they_use(client):
+    g = client.get("/api/default-tree", params={"lanes": 1}).json()
+    run = client.post("/api/runs", json={"graph": g, "settings": FAST}).json()
+    msgs = stream_all(client, run["id"])
+    first = msgs[0]
+    assert first["type"] == "system" and first["source"] == "sim" and "no Gazebo" in first["msg"]
+    takeoff = [m["msg"] for m in msgs if m["kind"] == "event" and m["node"] == "Takeoff" and m["type"] == "log"]
+    assert takeoff[0] == "climbing to 1.5 m"
+
+
+def test_openvins_log_lines():
+    from rowpilot.editor.runs import openvins_line
+
+    assert openvins_line("\x1b[0m\x1b[33m[init]: successful initialization in 0.0002 seconds") == "OpenVINS initialised"
+    assert openvins_line("[ZUPT]: accepted |v_IinG|") is None
+    assert openvins_line("bg = 0.1,0.2,0.3") is None
+
+
+def test_gazebo_run_stopped_while_starting_ends_at_once(gz_client, monkeypatch):
+    monkeypatch.setenv("FAKE_SLOW_START", "1")  # the stand-in hangs like a Gazebo that never loads
+    g = gz_client.get("/api/default-tree", params={"lanes": 1}).json()
+    run = gz_client.post("/api/runs", json={"graph": g, "settings": {"simulator": "gazebo", "lanes": 1}}).json()
+    with gz_client.websocket_connect(f"/api/runs/{run['id']}/stream") as ws:
+        msgs = ws.receive_json()
+        t0 = time.monotonic()
+        gz_client.post(f"/api/runs/{run['id']}/stop")
+        while msgs[-1]["kind"] != "end":
+            msgs += ws.receive_json()
+    assert time.monotonic() - t0 < 10
+    assert msgs[-1]["status"] == "stopped"
+    assert any("stopped while starting" in m.get("msg", "") for m in msgs)

@@ -220,6 +220,9 @@ class Preflight(Once):
 
 
 class Takeoff(Once):
+    def start(self) -> None:
+        self.log(f"climbing to {self.ctx.params.altitude:.1f} m")
+
     def run(self) -> Status:
         target = self.ctx.params.altitude
         self.ctx.send(Command(vz=altitude_hold(self.ctx.s.z, target)))

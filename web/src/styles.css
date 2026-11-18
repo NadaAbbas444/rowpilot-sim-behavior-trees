@@ -218,3 +218,30 @@ li.log-end[aria-hidden] { padding: 0; }
   .side { border-left: 0; border-top: 1px solid var(--line); }
   .tab-body { max-height: 60vh; }
 }
+
+/* flight stack messages */
+.log-src {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 1px 6px;
+  border-radius: 4px; white-space: nowrap; align-self: start; margin-top: 1px; color: #fff; background: var(--muted);
+}
+.src-ardupilot { background: #2b7a3d; }
+.src-mavlink { background: #2563eb; }
+.src-ekf { background: #7c3aed; }
+.src-vio { background: #c2410c; }
+.src-setup, .src-sim, .src-editor { background: var(--muted); }
+.log-system .log-msg { color: var(--ink); }
+.log-tools { flex-wrap: wrap; }
+.sim-choice { display: grid; gap: 8px; margin-bottom: 12px; }
+.sim-choice label {
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 8px; cursor: pointer;
+}
+.sim-choice label.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.sim-choice label.off { opacity: 0.75; cursor: default; }
+.sim-choice small { grid-column: 2; color: var(--muted); font-size: 11px; }
+.sim-choice .warn-text { color: var(--failure); }
+fieldset { border: 0; padding: 0; margin: 0; }
+fieldset:disabled { opacity: 0.5; }
+.statusbar .sys { color: var(--muted); overflow: hidden; text-overflow: ellipsis; max-width: 45vw; }
+.sim-badge { font-size: 11px; font-weight: 600; color: var(--muted); }
+.sim-badge.gz { color: #fff; background: #c2410c; border-color: #c2410c; }

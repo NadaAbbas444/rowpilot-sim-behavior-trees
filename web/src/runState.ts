@@ -6,8 +6,9 @@ export interface LogLine {
   id?: string;
   node: string;
   msg: string;
-  kind: 'log' | 'status' | 'end';
+  kind: 'log' | 'status' | 'end' | 'system';
   status?: Status;
+  source?: string; // system messages: who said it
 }
 
 export interface PathPoint {
@@ -24,6 +25,7 @@ export interface RunView {
   truePath: PathPoint[];
   estPath: PathPoint[];
   last: TickMsg | null;
+  lastSystem: LogLine | null; // the flight stack's latest message
   summary: Summary | null;
   error: string | null;
   received: number; // messages so far, to resume the stream after a reconnect
@@ -38,6 +40,7 @@ export const idleRun: RunView = {
   truePath: [],
   estPath: [],
   last: null,
+  lastSystem: null,
   summary: null,
   error: null,
   received: 0,
@@ -80,6 +83,10 @@ export function applyMessages(view: RunView, msgs: RunMessage[]): RunView {
       } else if (m.type === 'log') {
         if (m.id) v.lastLog[m.id] = m.msg ?? '';
         v.logs.push({ t: m.t, id: m.id, node: m.node, msg: m.msg ?? '', kind: 'log' });
+      } else if (m.type === 'system') {
+        const line: LogLine = { t: m.t, node: m.source ?? m.node, msg: m.msg ?? '', kind: 'system', source: m.source };
+        v.logs.push(line);
+        v.lastSystem = line;
       } else if (m.type === 'end') {
         v.logs.push({ t: m.t, id: m.id, node: m.node, msg: `run ended: ${m.msg}`, kind: 'end' });
       }

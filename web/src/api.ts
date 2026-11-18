@@ -1,5 +1,5 @@
 // Talking to the Python server (rowpilot/editor/server.py).
-import type { Graph, GraphIssue, LayoutInfo, NodeTypeSpec, RunInfo, RunMessage, Settings } from './types';
+import type { Graph, GraphIssue, LayoutInfo, NodeTypeSpec, RunInfo, RunMessage, Settings, Simulators } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -34,6 +34,7 @@ export const api = {
   defaultTree: (lanes: number, openEnds: boolean) =>
     call<Graph>(`/api/default-tree?lanes=${lanes}&open_ends=${openEnds}`),
   settingsDefaults: () => call<Settings>('/api/settings/defaults'),
+  simulators: () => call<Simulators>('/api/simulators'),
   layout: (s: Settings) =>
     call<LayoutInfo>(
       `/api/layout?lanes=${s.lanes}&open_ends=${s.open_ends}&row_length=${s.row_length}&path_width=${s.path_width}`,
