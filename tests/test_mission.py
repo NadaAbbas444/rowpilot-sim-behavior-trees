@@ -123,3 +123,14 @@ def test_open_lanes_are_still_swept_serpentine():
     assert r.outcome == "completed", r.outcome
     assert r.lanes_completed == [0, 1]
     assert max(t["x"] for t in r.trace) > lay.row_length  # turned in the far headland
+
+
+def test_planned_route_visits_every_lane_and_never_crosses_the_crop():
+    for lay in (SMALL, GreenhouseLayout(n_lanes=3, row_length=10.0, closed_end=False)):
+        route = lay.planned_route()
+        assert route[0] == route[-1] == lay.home
+        for i in range(lay.n_lanes):
+            assert any(abs(y - lay.lane_center_y(i)) < 1e-9 and x > lay.row_length / 2 for x, y in route)
+        for (x0, y0), (x1, y1) in zip(route, route[1:], strict=False):
+            if abs(y1 - y0) > 1e-9:  # every move across the rows happens in a headland
+                assert (x0 < 0 and x1 < 0) or (x0 > lay.row_length and x1 > lay.row_length)

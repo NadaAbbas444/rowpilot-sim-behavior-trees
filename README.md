@@ -101,7 +101,7 @@ Gazebo D435i → OpenVINS (no ROS) → MAVLink ODOMETRY → ArduPilot EKF3 (Exte
 VEHICLE=iris ./scripts/run_ardupilot_sim.sh ~/ardupilot ~/ardupilot_gazebo   # the ArduPilot Iris instead
 ```
 
-**Result, FireFly 2** (6 dead-end lanes, 13.3 m rows, OpenVINS → EKF3, scored against Gazebo ground truth): every lane flown in to 1 m short of the end wall, turned round (~6 s) and flown back out, home through the headland, landed by ArduCopter's LAND mode. **37–93 mm RMS from the lane centre, 0.36 m worst case**, closest approach to the end wall 0.8 m, 378 s. OpenVINS + EKF3 position error: 0.15 m mean; its drift over the ~150 m flight puts the touchdown 0.9 m from the take-off spot.
+**Result, FireFly 2** (6 dead-end lanes, 13.3 m rows, OpenVINS → EKF3, scored against Gazebo ground truth): every lane flown in to 1 m short of the end wall, turned round (~6 s) and flown back out, home through the headland, landed by ArduCopter's LAND mode. **50–104 mm RMS from the lane centre, 0.36 m worst case**, closest approach to the end wall 0.58 m (the turning point is 1.0 m before it; the drone overshoots by up to ~0.4 m while braking), 371 s, flown from a fresh clone set up with `scripts/setup_ardupilot_sim.sh` (two earlier runs: 37–117 mm RMS). The visual odometry drifts by roughly 0.6 % of the distance flown, so the touchdown is about 0.9 m from the take-off spot. The plot shows the planned path (green), the true path (blue) and what OpenVINS + EKF3 believed (orange).
 
 ![FireFly 2 in ArduPilot SITL + OpenVINS in Gazebo: six dead-end lanes, each flown in and back out, then home and landed](docs/firefly-gazebo-run.png)
 

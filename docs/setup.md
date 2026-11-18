@@ -104,8 +104,9 @@ Options (environment variables before the command):
 ### 3. Check it worked
 
 A good run ends with `"outcome": "completed"`, `"lanes_completed": [0, 1, 2, 3, 4, 5]` and a lane-centre
-error (`lane_rms_error_m`) under about 0.15 m. Two runs on the tested laptop: 37–117 mm RMS, worst
-0.36–0.52 m, 378–393 s.
+error (`lane_rms_error_m`) under about 0.15 m. Three runs on the tested laptop (one from a fresh clone
+set up with this guide): 37–117 mm RMS, worst 0.36–0.52 m, 371–393 s. In `path.png` the green line is
+the planned path, blue where the drone really flew, dashed orange where it believed it was.
 
 ## Troubleshooting
 

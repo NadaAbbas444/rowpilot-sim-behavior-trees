@@ -77,6 +77,23 @@ class GreenhouseLayout:
         x = self.row_length + self.headland if self.lane_direction(lane) > 0 else -self.headland
         return (x, self.lane_center_y(lane))
 
+    def planned_route(self) -> list[tuple[float, float]]:
+        """The intended flight path, as the mission tree plans it: from home through every lane (in to
+        the turning point and back out for closed lanes; through to the far headland for open ones),
+        then home along the near headland."""
+        route = [self.home]
+        for i in range(self.n_lanes):
+            route.append(self.lane_entry(i))
+            if self.closed_end:
+                route += [(self.turn_x(), self.lane_center_y(i)), self.lane_entry(i)]
+            else:
+                route.append(self.lane_exit(i))
+        last_x, last_y = route[-1]
+        if last_x > 0:  # ended in the far headland: back along the last lane, never through the crop
+            route.append((-self.headland, last_y))
+        route.append(self.home)
+        return route
+
     def progress_along_lane(self, lane: int, x: float) -> float:
         """Distance travelled along the crop rows of a lane (0 at the row start, row_length at the end)."""
         return x if self.lane_direction(lane) > 0 else self.row_length - x

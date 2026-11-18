@@ -1,4 +1,4 @@
-"""Top-down plot of a run: crop rows, the true flight path, and what visual odometry thought."""
+"""Top-down plot of a run: crop rows, the planned path, the true flight path, and what visual odometry thought."""
 
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ def plot_run(result: RunResult, layout: GreenhouseLayout, path: str) -> None:
                 (0, c - layout.crop_width / 2), layout.row_length, layout.crop_width, color="#5b8c3a", alpha=0.85, lw=0
             )
         )
-    for i in range(layout.n_lanes):
-        ax.plot([0, layout.row_length], [layout.lane_center_y(i)] * 2, color="#999", lw=0.6, ls=":")
+    px, py = zip(*layout.planned_route(), strict=True)
+    ax.plot(px, py, color="#2ca02c", lw=3.2, alpha=0.35, solid_joinstyle="round", label="planned path", zorder=1)
     xs, ys = [t["x"] for t in result.trace], [t["y"] for t in result.trace]
     ax.plot(
         [t["est_x"] for t in result.trace],
