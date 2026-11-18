@@ -1,5 +1,12 @@
 # Running rowpilot on the real FireFly (without ROS)
 
+> **Status: notes, not decided.** The FireFly's existing flight software (avemoy's `avtonomy_ws`) is a
+> ROS 2 (Humble) stack: realsense-ros, OpenVINS, mavros, mission_sequencer, greenhouse_mission,
+> lane_detection, ground_distance. The likely path is for the behaviour tree to replace
+> `greenhouse_mission`'s state machine inside that stack (the "If you would rather use ROS 2" section
+> below). This page describes the alternative without ROS. To be discussed before any work on the real
+> drone.
+
 The simulation already runs the real drone's software chain: OpenVINS on the D435i's infrared pair
 and IMU, the behaviour tree, lane perception on the depth image, MAVLink to ArduCopter with EKF3 on
 external navigation. On the drone, the only thing that changes is **where the sensor data comes from**

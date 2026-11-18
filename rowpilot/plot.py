@@ -13,7 +13,9 @@ def plot_run(result: RunResult, layout: GreenhouseLayout, path: str) -> None:
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle
 
-    fig, ax = plt.subplots(figsize=(12, 1.2 + 0.55 * layout.n_lanes))
+    x_span = layout.far_x + layout.headland + 3.0  # sized to the greenhouse, so the equal-aspect plot fills it
+    y_span = (layout.n_lanes + 1) * layout.pitch
+    fig, ax = plt.subplots(figsize=(min(16.0, 4.0 + 0.42 * x_span), 1.6 + 0.42 * y_span))
     for c in layout.crop_row_centers_y():
         ax.add_patch(
             Rectangle(
@@ -48,7 +50,7 @@ def plot_run(result: RunResult, layout: GreenhouseLayout, path: str) -> None:
         f"worst distance from lane centre {result.max_lane_error_m:.2f} m",
         fontsize=10,
     )
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.25), ncol=4, frameon=False, fontsize=9)
+    ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False, fontsize=9)
     fig.tight_layout()
     fig.savefig(path, dpi=130)
     plt.close(fig)

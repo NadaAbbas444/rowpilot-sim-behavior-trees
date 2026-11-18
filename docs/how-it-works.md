@@ -135,6 +135,8 @@ is no entry from the back. For every lane the drone:
 5. flies back out on the centre line (**Sweep out**), with the Pi Camera now seeing the other row,
 6. leaves the rows into the headland (**Exit**), back at the lane entry.
 
+![One lane, step by step](bt/lane.png)
+
 Then the next lane, and finally home and land. With `--open-ends` (`GreenhouseLayout(closed_end=False)`)
 the lanes are open at both ends and swept serpentine instead (in one end, out the other).
 
@@ -168,6 +170,8 @@ transitions between states; the priorities are visible in the shape of the tree;
 be tested on its own.
 
 ### The rowpilot tree
+
+![The behaviour tree](bt/tree.png)
 
 `python -m rowpilot tree` prints it; `python -m rowpilot tree --json` exports nodes and edges.
 
@@ -224,6 +228,8 @@ flowchart TD
 (Rounded boxes are conditions, square boxes are actions; → is a Sequence, ? a Selector.)
 
 ### How a tick flows
+
+![One tick of the tree](bt/tick.png)
 
 Every tick (`MissionContext.pre_tick`, then `root.tick_once()`):
 

@@ -1,6 +1,6 @@
-# rowpilot-bt
+# rowpilot-sim-behavior-trees
 
-[![Tests](https://github.com/NadaAbbas444/rowpilot-bt/actions/workflows/test.yml/badge.svg)](https://github.com/NadaAbbas444/rowpilot-bt/actions/workflows/test.yml)
+[![Tests](https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees/actions/workflows/test.yml/badge.svg)](https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees/actions/workflows/test.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776ab)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
@@ -10,17 +10,19 @@ A drone that flies the lanes between greenhouse crop rows, where GPS is denied (
 
 Target hardware: the FireFly 2 quadcopter (2004 motors, 4-inch props, 4S Molicel 21700 pack) with a flight controller running ArduPilot (ArduCopter), a Raspberry Pi 5 companion computer on SkiffOS, an Intel RealSense D435i at the front tilted 15° down (depth for lane perception; stereo infrared + IMU for OpenVINS visual-inertial odometry), a Raspberry Pi Camera Module 3 on the left side for plant images, and a battery. No GPS, no compass.
 
-The core of this repo is the part that does not depend on a simulator or the hardware: perception, control, the behaviour tree, and a lightweight simulator that sits behind the same `Vehicle` interface PX4 will use. It runs anywhere with Python 3.10+ and is covered by tests and CI.
+The core of this repo is the part that does not depend on a simulator or the hardware: perception, control, the behaviour tree, and a lightweight simulator behind the same `Vehicle` interface the ArduPilot simulation uses. It runs anywhere with Python 3.10+ and is covered by tests and CI. The full simulation (ArduPilot SITL + Gazebo + OpenVINS, with the FireFly model) runs on Ubuntu 22.04.
+
+**New here? Start with [docs/setup.md](docs/setup.md)**: setting it up on your laptop, step by step.
 
 ![Low-battery run: three lanes swept, then back home along a lane and landed](docs/low-battery-run.png)
 
-*`python -m rowpilot run --battery 45`: the reserve is reached at the start of lane 4, so the tree flies home along the lane (not through the crop) and lands. Blue is the true path; dashed orange is what visual odometry believed.*
+*`python -m rowpilot run --battery 45`: the battery reaches the reserve in lane 3, so the tree turns round, flies back out of the dead-end lane (never through the crop) and home, and lands. Blue is the true path; dashed orange is what visual odometry believed.*
 
 ## Run it
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate   # Ubuntu: sudo apt install python3-venv if missing
-pip install -U pip && pip install -e ".[dev]"
+pip install -U pip && pip install -e ".[dev,plot]"
 python -m rowpilot tree                                    # print the behaviour tree
 python -m rowpilot run --out runs/nominal                  # full 6-lane greenhouse
 python -m rowpilot run --battery 45 --out runs/low-battery # returns home on the reserve
@@ -43,6 +45,14 @@ Each run writes `events.jsonl` (every node's status changes and log lines), `tra
 | Runner | `rowpilot/runner.py` | Ticks the tree at 10 Hz and records per-node events (`on_event` streams them live) |
 
 ### The behaviour tree
+
+![The behaviour tree](docs/bt/tree.png)
+
+![One lane, step by step](docs/bt/lane.png)
+
+![One tick of the tree](docs/bt/tick.png)
+
+*Drawn from the code by `python scripts/bt_diagrams.py`; [docs/how-it-works.md](docs/how-it-works.md) explains every node.*
 
 ```
 Root (Sequence, re-evaluated every tick)
