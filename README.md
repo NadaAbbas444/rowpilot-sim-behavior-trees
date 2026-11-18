@@ -32,6 +32,18 @@ pytest -q
 
 Each run writes `events.jsonl` (every node's status changes and log lines), `trace.csv` (true and estimated pose, battery and active node at 10 Hz), `summary.json` and `path.png`.
 
+## Behaviour tree editor
+
+Draw or change the tree in the browser, run it in the simulator and watch every node live: running nodes light up, each node keeps its own log, and a map shows the flight. React + React Flow page, FastAPI server running the same tree code. **[docs/editor.md](docs/editor.md)**
+
+```bash
+pip install -e ".[editor]"
+cd web && npm ci && npm run build && cd ..
+python -m rowpilot editor          # http://127.0.0.1:8000
+```
+
+![The editor running the mission: active branch in amber, done in green, per-node log and map](docs/editor/editor-run.png)
+
 ## How it works
 
 | Piece | File | What it does |
@@ -163,6 +175,5 @@ Things learned getting PX4 to fly it, all handled in `rowpilot/px4.py`:
 
 ## Next steps
 
-1. **Node editor**: React Flow frontend + FastAPI backend that runs the tree, streaming `on_event` over a WebSocket so each node lights up and shows its own log (`python -m rowpilot tree --json` already exports nodes and edges).
-2. **Hardware**: RealSense driver and OpenVINS on the Pi 5, feeding ArduPilot's EKF3 as external navigation, as in the simulation; the depth image as the lane scan.
-3. **Measure the FireFly** and put the numbers in `rowpilot/airframe.py`: its weight (the model's 0.72 kg is an estimate from the CAD parts), motor KV and prop size and pitch (the model assumes ~7 N of thrust per motor), the D435i's tilt and the Pi Camera's side. The TF-Luna rangefinder in the CAD is not simulated yet.
+1. **Hardware**: RealSense driver and OpenVINS on the Pi 5, feeding ArduPilot's EKF3 as external navigation, as in the simulation; the depth image as the lane scan.
+2. **Measure the FireFly** and put the numbers in `rowpilot/airframe.py`: its weight (the model's 0.72 kg is an estimate from the CAD parts), motor KV and prop size and pitch (the model assumes ~7 N of thrust per motor), the D435i's tilt and the Pi Camera's side. The TF-Luna rangefinder in the CAD is not simulated yet.

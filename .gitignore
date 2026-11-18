@@ -6,3 +6,6 @@ __pycache__/
 .venv
 .venv-sim
 build/
+trees/
+web/node_modules/
+web/dist/

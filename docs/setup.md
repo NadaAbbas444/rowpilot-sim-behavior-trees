@@ -49,6 +49,17 @@ python -m rowpilot run --open-ends --out runs/open            # lanes open at bo
 python -m rowpilot run --help                                 # all options
 ```
 
+### The behaviour tree editor (optional)
+
+With Node.js 18+ as well (`node --version`):
+
+```bash
+cd web && npm ci && npm run build && cd ..
+python -m rowpilot editor                                   # open http://127.0.0.1:8000
+```
+
+See [editor.md](editor.md).
+
 ## Level 2: ArduPilot SITL + Gazebo
 
 ### 1. Install everything (once)
@@ -128,6 +139,7 @@ the planned path, blue where the drone really flew, dashed orange where it belie
 | [README.md](../README.md) | overview, results |
 | [how-it-works.md](how-it-works.md) | the whole system: processes, the behaviour tree node by node, failsafes, perception, control, localization |
 | [bt/](bt/) | behaviour tree diagrams (regenerate with `python scripts/bt_diagrams.py`) |
+| [editor.md](editor.md) | the behaviour tree editor (web page): draw the tree, run it, watch every node |
 | [deployment.md](deployment.md) | notes on running on the real drone |
 | `rowpilot/` | the Python package: tree, perception, control, simulator, ArduPilot vehicle |
 | `ardupilot/` | Gazebo models, world template, window layout, ArduCopter parameters |

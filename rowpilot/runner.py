@@ -1,7 +1,9 @@
 """Run a mission in the simulator and record what every node did.
 
 The event stream (status changes and node log lines) is what a node editor would show live, one
-log per node. Pass on_event to get the events as they happen.
+log per node. Pass on_event to get the events as they happen, and on_tick to see every tick's state
+(return False from it to stop the run). tree_factory builds a different tree, e.g. one drawn in the
+editor; nodes that carry a graph_id have it in their events.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ import math
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 
+import py_trees
 from py_trees.common import Status
 
 from .layout import GreenhouseLayout
@@ -29,7 +32,7 @@ class RunConfig:
 
 @dataclass
 class RunResult:
-    outcome: str  # "completed", "aborted: <reason>", "crashed", "timeout"
+    outcome: str  # "completed", "aborted: <reason>", "crashed", "timeout", "stopped"
     duration_s: float
     battery_end_pct: float
     lanes_completed: list[int]
@@ -45,13 +48,23 @@ class RunResult:
         return d
 
 
-def run_mission(cfg: RunConfig | None = None, on_event: Callable[[dict], None] | None = None) -> RunResult:
+def run_mission(
+    cfg: RunConfig | None = None,
+    on_event: Callable[[dict], None] | None = None,
+    *,
+    tree_factory: Callable[[MissionContext], py_trees.behaviour.Behaviour] = build_tree,
+    on_tick: Callable[[dict], bool | None] | None = None,
+) -> RunResult:
     cfg = cfg or RunConfig()
     lay = cfg.layout
     sim = SimVehicle(lay, cfg.sim)
     events: list[dict] = []
 
+    ids: dict[str, str] = {}  # node name -> graph id (trees built from an editor graph)
+
     def emit(ev: dict) -> None:
+        if ev["node"] in ids:
+            ev["id"] = ids[ev["node"]]
         events.append(ev)
         if on_event:
             on_event(ev)
@@ -63,7 +76,8 @@ def run_mission(cfg: RunConfig | None = None, on_event: Callable[[dict], None] |
         dt=1.0 / cfg.tick_hz,
         log_fn=lambda node, msg: emit({"t": round(sim.t, 2), "type": "log", "node": node, "msg": msg}),
     )
-    root = build_tree(ctx)
+    root = tree_factory(ctx)
+    ids.update({n.name: n.graph_id for n in root.iterate() if getattr(n, "graph_id", None) is not None})
     last_status: dict[str, Status] = {}
     trace: list[dict] = []
     lane_sq: dict[int, list[float]] = {}
@@ -107,10 +121,13 @@ def run_mission(cfg: RunConfig | None = None, on_event: Callable[[dict], None] |
                 else (f"aborted: {ctx.abort_reason or 'safety check failed before take-off'}")
             )
             break
+        if on_tick and on_tick(trace[-1]) is False:
+            outcome = "stopped"
+            break
         for _ in range(steps_per_tick):
             sim.step(cfg.sim_dt)
 
     rms = {k: math.sqrt(sum(v) / len(v)) for k, v in sorted(lane_sq.items())}
     max_err = max((math.sqrt(max(v)) for v in lane_sq.values()), default=0.0)
-    emit({"t": round(sim.t, 2), "type": "end", "node": "Root", "msg": outcome})
+    emit({"t": round(sim.t, 2), "type": "end", "node": root.name, "msg": outcome})
     return RunResult(outcome, round(sim.t, 2), round(sim.battery, 1), ctx.lanes_completed, rms, max_err, events, trace)

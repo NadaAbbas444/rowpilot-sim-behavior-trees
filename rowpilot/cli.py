@@ -4,6 +4,7 @@ python -m rowpilot run --out runs/nominal
 python -m rowpilot run --battery 45 --out runs/low-battery
 python -m rowpilot run --vo-dropout 30:1.5 --vo-dropout 120:10 --out runs/vo
 python -m rowpilot tree
+python -m rowpilot editor          # the behaviour tree editor at http://127.0.0.1:8000
 """
 
 from __future__ import annotations
@@ -72,7 +73,26 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-sim-time", type=float, default=900.0)
     ap.add_argument("--vehicle", choices=("firefly", "iris"), default="firefly", help="simulated drone")
     ap.add_argument("--out", type=Path)
+    ed = sub.add_parser("editor", help="the behaviour tree editor (web page + API)")
+    ed.add_argument("--host", default="127.0.0.1")
+    ed.add_argument("--port", type=int, default=8000)
+    ed.add_argument("--trees", type=Path, default=Path("trees"), help="folder for saved trees")
     a = p.parse_args(argv)
+
+    if a.cmd == "editor":
+        try:
+            import uvicorn
+
+            from .editor.server import WEB_DIST, create_app
+        except ImportError:
+            print('the editor needs its extras: pip install -e ".[editor]"', file=sys.stderr)
+            return 1
+        if not (WEB_DIST / "index.html").is_file():
+            print(f"web page not built ({WEB_DIST}): cd web && npm ci && npm run build; API only", file=sys.stderr)
+        print(f"rowpilot editor on http://{a.host}:{a.port}")
+        uvicorn.run(create_app(a.trees), host=a.host, port=a.port, log_level="warning")
+        return 0
+
     layout = _layout(a)
 
     if a.cmd == "world":
