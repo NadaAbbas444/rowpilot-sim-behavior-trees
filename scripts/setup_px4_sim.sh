@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time setup: PX4 SITL + Gazebo Harmonic + the rowpilot greenhouse drone (Ubuntu 22.04 / 24.04).
-# Takes 20-40 minutes, mostly downloading and compiling PX4. Run from the rowpilot-bt folder:
+# Takes 20-40 minutes, mostly downloading and compiling PX4. Run from the repository folder:
 #   ./scripts/setup_px4_sim.sh            (PX4 goes to ~/PX4-Autopilot)
 #   ./scripts/setup_px4_sim.sh /some/dir  (PX4 goes to /some/dir/PX4-Autopilot)
 set -euo pipefail

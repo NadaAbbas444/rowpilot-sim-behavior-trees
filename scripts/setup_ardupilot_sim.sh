@@ -1,12 +1,31 @@
 #!/usr/bin/env bash
 # One-time setup: ArduPilot SITL (ArduCopter) + ardupilot_gazebo + OpenVINS + the rowpilot VIO bridge,
-# on Ubuntu 22.04 / 24.04 with Gazebo Harmonic. Takes 20-40 minutes. Run from the rowpilot-bt folder:
+# on Ubuntu 22.04 with Gazebo Harmonic. Takes 20-40 minutes, ~4 GB. Run from the repository folder:
 #   ./scripts/setup_ardupilot_sim.sh [install_dir]     (default: ~, i.e. ~/ardupilot, ~/ardupilot_gazebo, ~/open_vins)
-# Repeats the steps used to fly the mission in the cloud test machine (Ubuntu 24.04).
+# ArduPilot, ardupilot_gazebo and OpenVINS are checked out at the commits the mission was flown with
+# (below); an existing checkout in install_dir is used as it is. See docs/setup.md.
 set -euo pipefail
 export PYTHONNOUSERSITE=1
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 DIR=${1:-$HOME}
+# Tested versions (2026-11-18): change these only together with a test flight.
+ARDUPILOT_SHA=d536b382aa2cb2c804a4530b25c11f8388d1ee06       # ArduPilot master, 2026-10-16
+ARDUPILOT_GAZEBO_SHA=f116b03552d05c8d0b0bed5ed67033a1183121d1 # ardupilot_gazebo main, 2026-10-29
+OPENVINS_SHA=69488123ed9362dd44b6f28e7f4680abbff1442b         # OpenVINS master, 2025-11-30
+
+# clone_at <url> <dir> <commit>: a shallow checkout of exactly that commit, unless <dir> exists.
+clone_at() {
+  if [ -d "$2" ]; then
+    local have
+    have=$(git -C "$2" rev-parse HEAD 2> /dev/null || echo "?")
+    [ "$have" = "$3" ] || echo "note: using the existing $2 at ${have:0:7} (tested: ${3:0:7})"
+    return 0
+  fi
+  git init -q "$2"
+  git -C "$2" remote add origin "$1"
+  git -C "$2" fetch -q --depth 1 origin "$3"
+  git -C "$2" checkout -q FETCH_HEAD
+}
 
 echo "== 1/6 system packages (Gazebo Harmonic dev, OpenVINS dependencies)"
 if ! command -v gz > /dev/null; then
@@ -34,7 +53,7 @@ echo "== 2/6 Python environment .venv-sim (sees the Gazebo bindings; also ArduPi
 "$REPO/.venv-sim/bin/pip" install -q empy==3.3.4 pexpect future lxml pymavlink -e "$REPO[plot]"
 
 echo "== 3/6 ArduPilot SITL (ArduCopter) -> $DIR/ardupilot"
-[ -d "$DIR/ardupilot" ] || git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/ArduPilot/ardupilot.git "$DIR/ardupilot"
+clone_at https://github.com/ArduPilot/ardupilot.git "$DIR/ardupilot" "$ARDUPILOT_SHA"
 # An existing checkout may lack submodules (waf, mavlink, littlefs ...): fetch only the missing ones,
 # leave the ones already checked out (possibly with local changes) alone.
 # A submodule whose checkout lost all its files is repaired too; any other local change is kept.
@@ -45,12 +64,12 @@ echo "== 3/6 ArduPilot SITL (ArduCopter) -> $DIR/ardupilot"
   PATH="$REPO/.venv-sim/bin:$PATH" ./waf configure --board sitl && PATH="$REPO/.venv-sim/bin:$PATH" ./waf copter)
 
 echo "== 4/6 ardupilot_gazebo plugin -> $DIR/ardupilot_gazebo"
-[ -d "$DIR/ardupilot_gazebo" ] || git clone --depth 1 https://github.com/ArduPilot/ardupilot_gazebo.git "$DIR/ardupilot_gazebo"
+clone_at https://github.com/ArduPilot/ardupilot_gazebo.git "$DIR/ardupilot_gazebo" "$ARDUPILOT_GAZEBO_SHA"
 cmake -S "$DIR/ardupilot_gazebo" -B "$DIR/ardupilot_gazebo/build" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build "$DIR/ardupilot_gazebo/build" -j"$(nproc)"
 
 echo "== 5/6 OpenVINS (without ROS) -> $DIR/open_vins"
-[ -d "$DIR/open_vins" ] || git clone --depth 1 https://github.com/rpng/open_vins.git "$DIR/open_vins"
+clone_at https://github.com/rpng/open_vins.git "$DIR/open_vins" "$OPENVINS_SHA"
 cmake -S "$DIR/open_vins/ov_msckf" -B "$DIR/open_vins/ov_msckf/build" -DENABLE_ROS=OFF -DENABLE_ARUCO_TAGS=OFF \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build "$DIR/open_vins/ov_msckf/build" --target ov_msckf_lib -j"$(nproc)"
