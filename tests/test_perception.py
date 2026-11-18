@@ -8,11 +8,12 @@ from rowpilot.perception import estimate_lane
 from rowpilot.sim import SimConfig, SimVehicle
 
 LAY = GreenhouseLayout()
+OPEN = GreenhouseLayout(closed_end=False)  # lanes open at both ends
 
 
-def scan_at(x, y, yaw, noise=0.01, seed=0, foliage=0.0):
+def scan_at(x, y, yaw, noise=0.01, seed=0, foliage=0.0, layout=LAY):
     """Geometry tests use clean crop faces (foliage=0); the foliage tests below use leafy ones."""
-    v = SimVehicle(LAY, SimConfig(depth_noise_m=noise, seed=seed, foliage_m=foliage, depth_dropout=0.0))
+    v = SimVehicle(layout, SimConfig(depth_noise_m=noise, seed=seed, foliage_m=foliage, depth_dropout=0.0))
     v.x, v.y, v.yaw, v.z = x, y, yaw, 1.5
     return v.depth_scan()
 
@@ -39,12 +40,13 @@ def test_both_faces_seen_in_mid_lane():
     assert est.n_left > 10 and est.n_right > 10
 
 
-@pytest.mark.parametrize("x,lane", [(-1.5, 0), (LAY.row_length + 1.5, 1)])
+@pytest.mark.parametrize("x,lane", [(-1.5, 0), (OPEN.row_length + 1.5, 1)])
 def test_lane_entry_from_headland(x, lane):
-    """At a lane entry, the end faces and other rows are visible too; the estimate must still be right."""
-    yaw = LAY.lane_yaw(lane) + 0.05
-    y = LAY.lane_center_y(lane) + 0.1
-    est = estimate_lane(scan_at(x, y, yaw), LAY.path_width)
+    """At a lane entry, the end faces and other rows are visible too; the estimate must still be right.
+    (Entering from the far headland only happens with open lanes.)"""
+    yaw = OPEN.lane_yaw(lane) + 0.05
+    y = OPEN.lane_center_y(lane) + 0.1
+    est = estimate_lane(scan_at(x, y, yaw, layout=OPEN), OPEN.path_width)
     assert est.valid
     assert est.lateral_offset == pytest.approx(true_offset(lane, y, yaw), abs=0.05)
 

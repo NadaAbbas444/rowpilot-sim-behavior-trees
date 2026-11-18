@@ -36,7 +36,10 @@ def plot_run(result: RunResult, layout: GreenhouseLayout, path: str) -> None:
     ax.plot(hx, hy, marker="s", color="k", ms=6, label="home")
     ax.plot(xs[-1], ys[-1], marker="v", color="#c0392b", ms=8, label="end")
     ax.set_aspect("equal")
-    ax.set_xlim(hx - 1, layout.row_length + layout.headland + 1)
+    if layout.closed_end:
+        y0, y1 = layout.crop_row_centers_y()[0], layout.crop_row_centers_y()[-1]
+        ax.plot([layout.far_x] * 2, [y0 - 0.5, y1 + 0.5], color="#555", lw=3, label="end wall")
+    ax.set_xlim(hx - 1, layout.far_x + (0.6 if layout.closed_end else -1.0))
     ax.set_xlabel("along rows (m)")
     ax.set_ylabel("across (m)")
     ax.set_title(

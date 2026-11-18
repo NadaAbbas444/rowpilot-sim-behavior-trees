@@ -81,7 +81,8 @@ def test_tree_export_for_editor():
     ctx = MissionContext(SimVehicle(SMALL), SMALL)
     d = tree_to_dict(build_tree(ctx))
     names = {n["name"] for n in d["nodes"]}
-    assert {"SafetyGuard", "Mission", "Lane 3: Sweep", "Failsafe: ReturnHome"} <= names
+    lane3 = {"Lane 3: Sweep in", "Lane 3: TurnAround", "Lane 3: Sweep out"}
+    assert {"SafetyGuard", "Mission", "Failsafe: ReturnHome", *lane3} <= names
     assert len(d["edges"]) == len(d["nodes"]) - 1  # a tree
 
 
@@ -102,3 +103,23 @@ def test_frequent_vo_glitches_resume_without_replanning():
         plans = [e for e in r.events if e["type"] == "log" and e["node"] == node and e["msg"].startswith("waypoints")]
         assert len(plans) == 1, node
     assert all(any(e["msg"].startswith(f"lane {i} swept") for e in r.events if e["type"] == "log") for i in (1, 2, 3))
+
+
+def test_closed_lanes_are_flown_in_and_back_out():
+    """Dead-end lanes (the real greenhouse): every lane is entered and left from the near headland,
+    with a turn short of the end wall, and the drone never gets close to the wall."""
+    r = run()
+    assert r.outcome == "completed", r.outcome
+    for i in (1, 2, 3):
+        assert statuses(r, f"Lane {i}: TurnAround")[-1] == "SUCCESS"
+        assert statuses(r, f"Lane {i}: Sweep out")[-1] == "SUCCESS"
+    assert max(t["x"] for t in r.trace) < SMALL.row_length - 0.5  # wall at row_length
+    assert max(t["x"] for t in r.trace) > SMALL.turn_x() - 0.3  # but it did sweep to the end
+
+
+def test_open_lanes_are_still_swept_serpentine():
+    lay = GreenhouseLayout(n_lanes=2, row_length=10.0, closed_end=False)
+    r = run(layout=lay)
+    assert r.outcome == "completed", r.outcome
+    assert r.lanes_completed == [0, 1]
+    assert max(t["x"] for t in r.trace) > lay.row_length  # turned in the far headland

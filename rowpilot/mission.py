@@ -9,8 +9,8 @@ Root (Sequence, re-evaluated every tick)
 │       └── ReturnAndLand (Sequence): Airborne, ReturnHome, Land  <- low battery or a failed step
 └── Mission (Sequence)
     ├── Preflight, Takeoff
-    ├── Lane 1 (Sequence): GoToEntry, Align, Sweep, Exit
-    ├── ...
+    ├── Lane 1 (Sequence): GoToEntry, Align, Sweep in, TurnAround, Sweep out, Exit
+    ├── ...         (closed lanes, the default; open lanes: GoToEntry, Align, Sweep, Exit)
     └── ReturnHome, Land
 
 Because the guard sits in front of the mission and both are re-ticked every tick, a failing check
@@ -29,7 +29,7 @@ import numpy as np
 import py_trees
 from py_trees.common import Status
 
-from .control import Command, LaneFollower, altitude_hold, goto_command
+from .control import Command, LaneFollower, altitude_hold, clamp, goto_command
 from .layout import GreenhouseLayout
 from .perception import LaneEstimate, LaneFilter, estimate_lane
 from .vehicle import Vehicle, VehicleState
@@ -301,11 +301,28 @@ class AlignToLane(Once):
 
 
 class SweepLane(Once):
-    """Fly the length of the lane on the perceived centre line; hold it on VO if the faces drop out."""
+    """Fly along the lane on the perceived centre line; hold it on VO if the faces drop out.
 
-    def __init__(self, name, ctx, lane: int):
+    direction +1 flies towards +x. The sweep ends at end_x (default: the end of the rows). A closed
+    lane is swept twice: in to the turning point (stop_at_end: slow down to stop there, short of the
+    end wall), and back out to the row start (final: only then does the lane count as done)."""
+
+    def __init__(
+        self,
+        name,
+        ctx,
+        lane: int,
+        direction: int | None = None,
+        end_x: float | None = None,
+        stop_at_end: bool = False,
+        final: bool = True,
+    ):
         super().__init__(name, ctx)
         self.lane_idx, self.follower = lane, LaneFollower()
+        lay = ctx.layout
+        self.direction = direction or lay.lane_direction(lane)
+        self.end_x = end_x if end_x is not None else (lay.row_length if self.direction > 0 else 0.0)
+        self.stop_at_end, self.final = stop_at_end, final
 
     def start(self) -> None:
         self.follower.reset()
@@ -313,28 +330,38 @@ class SweepLane(Once):
         if not hasattr(self, "offsets"):  # keep the statistics across interruptions
             self.offsets: list[float] = []
 
+    def remaining(self, x: float) -> float:
+        """Distance still to fly along the lane (negative once past end_x)."""
+        return (self.end_x - x) * self.direction
+
     def run(self) -> Status:
         c, est, lay = self.ctx, self.ctx.lane, self.ctx.layout
-        progress = lay.progress_along_lane(self.lane_idx, c.s.x)
-        if progress >= lay.row_length - 0.2:
-            c.lanes_completed.append(self.lane_idx)
+        left = self.remaining(c.s.x)
+        if left <= 0.2:
+            if self.final:
+                c.lanes_completed.append(self.lane_idx)
             if self.offsets:
                 rms = float(np.sqrt(np.mean(np.square(self.offsets))))
-                self.log(f"lane {self.lane_idx + 1} swept, perceived RMS offset {rms:.3f} m")
+                what = "swept" if self.final else "in to the turning point"
+                self.log(f"lane {self.lane_idx + 1} {what}, perceived RMS offset {rms:.3f} m")
             return Status.SUCCESS
+        speed = c.params.sweep_speed
+        if self.stop_at_end:  # brake well before the end wall: the flight controller reacts ~0.5 s late
+            speed = clamp(0.5 * left, 0.15, speed)
         if est.valid:
             self.lost_since = None
             self.offsets.append(est.lateral_offset)
-            c.send(self.follower.step(est, c.params.sweep_speed, c.dt))
+            c.send(self.follower.step(est, speed, c.dt))
             return Status.RUNNING
-        # Crop faces not visible: hold the lane centre by VO. Near the row end that is expected (the
-        # faces run out of view); mid-row it means something is wrong, so slow down and give up after a while.
-        near_end = progress > lay.row_length - 3.0
+        # Crop faces not visible: hold the lane centre by VO. Near the end that is expected (the faces
+        # run out of view at the row start, and at a closed end the camera sees the wall); mid-row it
+        # means something is wrong, so slow down and give up after a while.
+        near_end = left < 3.0
         if not near_end:
             self.lost_since = self.lost_since if self.lost_since is not None else c.s.t
             if c.s.t - self.lost_since > c.params.lane_lost_timeout_s:
                 return self.fail("lane lost")
-        d, lane_y = lay.lane_direction(self.lane_idx), lay.lane_center_y(self.lane_idx)
+        d, lane_y = self.direction, lay.lane_center_y(self.lane_idx)
         cmd, _ = goto_command(
             c.s.x,
             c.s.y,
@@ -343,7 +370,7 @@ class SweepLane(Once):
             lane_y,
             None,
             start=(c.s.x - d, lane_y),
-            v_max=c.params.sweep_speed if near_end else 0.3,
+            v_max=speed if near_end else 0.3,
         )
         c.send(cmd)
         return Status.RUNNING
@@ -385,7 +412,7 @@ class Airborne(Condition):
 
 def home_route(ctx: MissionContext) -> list[tuple[float, float]]:
     """Back to the take-off spot without cutting through crop rows: leave the lane along its axis
-    on the near headland side, then cross the headland."""
+    on the near headland side (the only way out of a closed lane), then cross the headland."""
     lay, s = ctx.layout, ctx.s
     hx, hy = lay.home
     if s.x > 0:  # inside the rows or in the far headland
@@ -466,18 +493,21 @@ def build_tree(ctx: MissionContext) -> py_trees.behaviour.Behaviour:
         def entry_route(prev=prev_exit, entry=entry):
             return [entry] if prev is None else [prev, entry]
 
-        lanes.append(
-            Seq(
-                n,
-                memory=False,
-                children=[
-                    GoTo(f"{n}: GoToEntry", ctx, entry_route, final_yaw=lay.lane_yaw(i)),
-                    AlignToLane(f"{n}: Align", ctx, i),
-                    SweepLane(f"{n}: Sweep", ctx, i),
-                    GoTo(f"{n}: Exit", ctx, lambda i=i: [lay.lane_exit(i)], final_yaw=None),
-                ],
-            )
-        )
+        steps = [
+            GoTo(f"{n}: GoToEntry", ctx, entry_route, final_yaw=lay.lane_yaw(i)),
+            AlignToLane(f"{n}: Align", ctx, i),
+        ]
+        if lay.closed_end:  # a dead end: in to the turning point, turn round, back out the same lane
+            turn = (lay.turn_x(), lay.lane_center_y(i))
+            steps += [
+                SweepLane(f"{n}: Sweep in", ctx, i, +1, end_x=turn[0], stop_at_end=True, final=False),
+                GoTo(f"{n}: TurnAround", ctx, lambda turn=turn: [turn], final_yaw=math.pi),
+                SweepLane(f"{n}: Sweep out", ctx, i, -1, end_x=0.0),
+            ]
+        else:
+            steps.append(SweepLane(f"{n}: Sweep", ctx, i))
+        steps.append(GoTo(f"{n}: Exit", ctx, lambda i=i: [lay.lane_exit(i)], final_yaw=None))
+        lanes.append(Seq(n, memory=False, children=steps))
 
     mission = Seq(
         "Mission",

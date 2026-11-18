@@ -7,7 +7,8 @@ Each crop row is an invisible collision box (so a drone that drifts into the cro
 with procedural tomato plants (see greenhouse_assets.py). The lanes have the heating-pipe rails of a
 tomato greenhouse, the floor is ground cover with dirt and leaf litter (visual odometry needs features
 to track), steel posts stand in the crop rows, yellow sticky tape hangs above each row at 2.8 m, and
-glass facades with columns and glazing bars close the greenhouse.
+glass facades with columns and glazing bars close the greenhouse. With closed lanes (the default)
+the far facade stands at the end of the rows, so every lane is a dead end.
 Without plant meshes (plants=None) the rows are plain green boxes, which is quicker to render.
 
 PX4 needs its own world plugins (physics, sensors, IMU, magnetometer, ...). Rather than copy them,
@@ -110,7 +111,7 @@ def infrastructure(layout: GreenhouseLayout, textured_floor: bool) -> str:
                 (L / 2, c, TAPE_HEIGHT_M, 0, 0, 0),
             )
         )
-    x0, x1 = layout.home[0] - 2.0, L + layout.headland + 2.0
+    x0, x1 = layout.home[0] - 2.0, layout.far_x  # closed lanes end at the far wall
     y0, y1 = -layout.pitch - 1.0, layout.n_lanes * layout.pitch + 1.0
     out.append(floor(x0, x1, y0, y1, textured_floor))
     out.append(walls(x0, x1, y0, y1))

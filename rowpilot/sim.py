@@ -130,6 +130,10 @@ class SimVehicle:
         half = self.layout.crop_width / 2
         on_end = (np.abs(yh[:, :, None] - self._centers[None, None, :]) <= half).any(axis=2)
         t = np.minimum(t, np.where((te > 0) & on_end, te, np.inf).min(axis=1))
+        if self.layout.closed_end:  # the end wall closing every lane
+            with np.errstate(divide="ignore", invalid="ignore"):
+                tw = (self.layout.row_length - self.x) / co
+            t = np.minimum(t, np.where(tw > 0, tw, np.inf))
         hit = (t <= c.depth_max_range) & (self.rng.random(len(t)) >= c.depth_dropout)
         r = t[hit] + self.rng.normal(0, c.depth_noise_m, hit.sum()) * (1 + t[hit] ** 2 / 4)
         return np.column_stack([r * np.cos(a[hit]), r * np.sin(a[hit])])
@@ -186,5 +190,7 @@ class SimVehicle:
         )
         if airborne and self.layout.in_crop(self.x, self.y, margin=c.drone_radius):
             self.crashed = True
+        if airborne and self.layout.closed_end and self.x > self.layout.row_length - c.drone_radius:
+            self.crashed = True  # flew into the end wall
         if self.battery <= 0 and airborne:
             self.crashed = True
