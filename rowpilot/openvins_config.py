@@ -109,12 +109,14 @@ feat_rep_aruco: "ANCHORED_MSCKF_INVERSE_DEPTH"
 
 # Zero-velocity updates: the drone sits still on the ground before take-off. This also lets
 # OpenVINS initialise while standing still (PX4/ArduPilot need a position before arming).
+# Only until it first moves: hovering or creeping along a lane, the image hardly changes, the
+# disparity test passes and ZUPT would clamp the velocity of a drone that is not standing still.
 try_zupt: true
 zupt_chi2_multipler: 0
 zupt_max_velocity: 0.1
 zupt_noise_multiplier: 10
 zupt_max_disparity: 0.5
-zupt_only_at_beginning: false
+zupt_only_at_beginning: true
 
 init_window_time: 2.0
 init_imu_thresh: 1.0

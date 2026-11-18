@@ -1,6 +1,7 @@
 // rowpilot VIO bridge: D435i stereo infrared + IMU (from Gazebo) -> OpenVINS -> odometry.
 //
 //   vio_bridge <estimator_config.yaml> [topic_prefix=/gh_x500] [out_topic=/rowpilot/vio/odometry]
+//              [imu_topic=<topic_prefix>/d435i_imu]
 //
 // Published gz.msgs.Odometry, in OpenVINS's global frame G (gravity-aligned, z up, origin and yaw
 // fixed at initialisation), for the IMU (= D435i) frame:
@@ -51,11 +52,13 @@ cv::Mat to_mat(const gz::msgs::Image &m) {
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::cerr << "usage: vio_bridge <estimator_config.yaml> [topic_prefix] [out_topic]\n";
+    std::cerr << "usage: vio_bridge <estimator_config.yaml> [topic_prefix] [out_topic] [imu_topic]\n";
     return 2;
   }
   const std::string prefix = argc > 2 ? argv[2] : "/gh_x500";
   const std::string out_topic = argc > 3 ? argv[3] : "/rowpilot/vio/odometry";
+  // ArduPilot sim: <prefix>/d435i_imu_kin from rowpilot.imu_synth (Gazebo's accelerometer is wrong in turns).
+  const std::string imu_topic = argc > 4 ? argv[4] : prefix + "/d435i_imu";
   std::signal(SIGINT, [](int) { g_run = false; });
   std::signal(SIGTERM, [](int) { g_run = false; });
 
@@ -86,11 +89,11 @@ int main(int argc, char **argv) {
     std::lock_guard<std::mutex> lk(g_mtx);
     g_right[stamp(m.header())] = to_mat(m);
   };
-  node.Subscribe(prefix + "/d435i_imu", on_imu);
+  node.Subscribe(imu_topic, on_imu);
   node.Subscribe(prefix + "/infra1", on_left);
   node.Subscribe(prefix + "/infra2", on_right);
   auto pub = node.Advertise<gz::msgs::Odometry>(out_topic);
-  std::cout << "[vio_bridge] listening on " << prefix << "/{infra1,infra2,d435i_imu}, publishing " << out_topic
+  std::cout << "[vio_bridge] listening on " << prefix << "/{infra1,infra2} and " << imu_topic << ", publishing " << out_topic
             << std::endl;
 
   double last_imu_t = -1, last_report = -1;
