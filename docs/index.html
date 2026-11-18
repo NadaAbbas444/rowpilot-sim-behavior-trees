@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>rowpilot: a GPS-denied greenhouse drone flown by a behaviour tree</title>
+  <meta name="description" content="A drone that sweeps greenhouse lanes without GPS: visual-inertial odometry, lane-centric control, a behaviour tree, ArduPilot SITL + Gazebo simulation and a live behaviour tree editor." />
+  <style>
+    :root {
+      --bg: #f7f8f5;
+      --panel: #ffffff;
+      --ink: #1b231c;
+      --muted: #5d6b60;
+      --line: #dfe4dc;
+      --accent: #2f7d3b;
+      --accent-2: #c2410c;
+      --code: #eef1ec;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 28px rgba(20, 40, 20, 0.08);
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111511;
+        --panel: #181e19;
+        --ink: #e6ece6;
+        --muted: #9aa89c;
+        --line: #2a332b;
+        --accent: #6fc47c;
+        --accent-2: #f08a4b;
+        --code: #1f271f;
+        --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 28px rgba(0, 0, 0, 0.35);
+        color-scheme: dark;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font: 17px/1.6 system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+    }
+    a { color: var(--accent); }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+    header.top {
+      position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent);
+      backdrop-filter: blur(8px); border-bottom: 1px solid var(--line);
+    }
+    header.top .wrap { display: flex; align-items: center; gap: 20px; height: 56px; }
+    .brand { font-weight: 800; letter-spacing: -0.01em; text-decoration: none; color: var(--ink); }
+    .brand span { color: var(--accent); }
+    nav { display: flex; gap: 18px; margin-left: auto; font-size: 15px; overflow-x: auto; }
+    nav a { color: var(--muted); text-decoration: none; white-space: nowrap; }
+    nav a:hover { color: var(--ink); }
+
+    .hero { padding: 64px 0 32px; }
+    .hero h1 { font-size: clamp(32px, 5vw, 54px); line-height: 1.08; margin: 0 0 18px; letter-spacing: -0.02em; }
+    .hero h1 em { font-style: normal; color: var(--accent); }
+    .hero p.lead { font-size: 20px; color: var(--muted); max-width: 760px; margin: 0 0 26px; }
+    .buttons { display: flex; gap: 12px; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px; font-weight: 600;
+      text-decoration: none; border: 1px solid var(--line); color: var(--ink); background: var(--panel);
+    }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn:hover { filter: brightness(1.05); }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 26px 0 0; padding: 0; list-style: none; }
+    .chips li { font-size: 14px; padding: 4px 11px; border-radius: 99px; background: var(--code); color: var(--muted); }
+
+    .media {
+      border-radius: 14px; overflow: hidden; background: #000; box-shadow: var(--shadow); border: 1px solid var(--line);
+    }
+    .media video, .media img { display: block; width: 100%; height: auto; }
+    a.media { display: block; }
+    .caption { font-size: 14px; color: var(--muted); margin: 10px 2px 0; }
+    .hero-media { margin-top: 40px; }
+
+    section { padding: 64px 0; border-top: 1px solid var(--line); }
+    section h2 { font-size: clamp(26px, 3.4vw, 36px); margin: 0 0 8px; letter-spacing: -0.01em; }
+    section .kicker { text-transform: uppercase; letter-spacing: 0.08em; font-size: 13px; font-weight: 700; color: var(--accent); margin: 0 0 6px; }
+    section > .wrap > p.intro { color: var(--muted); max-width: 780px; margin: 0 0 30px; font-size: 18px; }
+
+    .split { display: grid; grid-template-columns: 1.55fr 1fr; gap: 36px; align-items: start; }
+    .split.flip { grid-template-columns: 1fr 1.55fr; }
+    .split.flip > .text { order: -1; }
+    .text h3 { margin: 0 0 10px; font-size: 21px; }
+    .text ul { padding-left: 20px; margin: 0; }
+    .text li { margin: 6px 0; }
+    .text p { margin: 0 0 12px; }
+
+    .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; box-shadow: var(--shadow); }
+    .card h3 { margin: 0 0 8px; font-size: 18px; }
+    .card p { margin: 0; color: var(--muted); font-size: 15.5px; }
+    .card .num { font-size: 30px; font-weight: 800; color: var(--accent); line-height: 1.1; margin-bottom: 6px; }
+
+    .pipeline { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 6px 0 30px; }
+    .pipeline .step {
+      flex: 1 1 150px; background: var(--panel); border: 1px solid var(--line); padding: 14px 16px; position: relative;
+      min-height: 96px;
+    }
+    .pipeline .step:first-child { border-radius: 12px 0 0 12px; }
+    .pipeline .step:last-child { border-radius: 0 12px 12px 0; }
+    .pipeline .step b { display: block; font-size: 15px; }
+    .pipeline .step span { font-size: 13.5px; color: var(--muted); }
+    .pipeline .step + .step { border-left: 0; }
+    .pipeline .step + .step::before {
+      content: '→'; position: absolute; left: -9px; top: 50%; transform: translateY(-50%); font-weight: 800;
+      color: var(--accent); background: var(--bg); line-height: 1;
+    }
+
+    pre {
+      background: var(--code); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 14.5px; line-height: 1.5;
+      margin: 8px 0 18px;
+    }
+    code { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+    p code, li code { background: var(--code); padding: 1px 6px; border-radius: 5px; font-size: 0.9em; }
+    table { border-collapse: collapse; width: 100%; font-size: 15.5px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 14px; }
+    .wide-img { margin-top: 26px; }
+    .levels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .levels .card h3 small { display: block; font-weight: 500; color: var(--muted); font-size: 14px; margin-top: 2px; }
+    .levels .card pre { font-size: 13px; margin-bottom: 0; }
+    footer { padding: 40px 0 60px; color: var(--muted); font-size: 15px; border-top: 1px solid var(--line); }
+
+    @media (max-width: 860px) {
+      .split, .split.flip, .grid3, .levels { grid-template-columns: 1fr; }
+      .split.flip > .text { order: 0; }
+      nav { display: none; }
+      .pipeline .step { flex-basis: 100%; border-radius: 0 !important; border-left: 1px solid var(--line) !important; }
+      .pipeline .step + .step::before { content: '↓'; left: 50%; top: -11px; transform: translateX(-50%); }
+      .pipeline .step + .step { border-top: 0; }
+      .pipeline .step:first-child { border-radius: 12px 12px 0 0 !important; }
+      .pipeline .step:last-child { border-radius: 0 0 12px 12px !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="#">row<span>pilot</span></a>
+      <nav>
+        <a href="#simulation">Simulation</a>
+        <a href="#editor">Editor</a>
+        <a href="#failsafes">Failsafes</a>
+        <a href="#how">How it works</a>
+        <a href="#results">Results</a>
+        <a href="#start">Get started</a>
+        <a href="https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="wrap hero">
+      <h1>A greenhouse drone that flies <em>without GPS</em>, run by a behaviour tree.</h1>
+      <p class="lead">
+        rowpilot sweeps the dead-end lanes between crop rows: visual-inertial odometry tells it where it is, the
+        depth camera keeps it centred in each lane, and a behaviour tree decides what to do next, from take-off
+        to failsafes. Everything runs in simulation today, on the real drone's software chain.
+      </p>
+      <div class="buttons">
+        <a class="btn primary" href="https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees">View on GitHub</a>
+        <a class="btn" href="https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees/blob/editor/docs/setup.md">Set it up</a>
+        <a class="btn" href="#editor">See the editor</a>
+      </div>
+      <ul class="chips">
+        <li>FireFly 2 quadcopter</li><li>ArduPilot SITL</li><li>Gazebo Harmonic</li><li>OpenVINS</li>
+        <li>RealSense D435i</li><li>py_trees</li><li>React Flow</li><li>FastAPI</li><li>no ROS</li>
+      </ul>
+      <div class="hero-media media">
+        <video src="media/gazebo-flight.mp4" poster="media/gazebo-flight.jpg" autoplay muted loop playsinline controls preload="metadata"></video>
+      </div>
+      <p class="caption">The FireFly 2 sweeping lane 1 in the Gazebo greenhouse, seen from the entrance: in to the end wall,
+        turn round, back out and land, flown by ArduCopter SITL with OpenVINS on the simulated D435i. On the right, live:
+        the infrared image OpenVINS tracks, the depth image the lane perception uses, and the side Pi Camera on the
+        plants. Sped up 2×.</p>
+    </div>
+
+    <section id="simulation">
+      <div class="wrap">
+        <p class="kicker">Simulation</p>
+        <h2>The real drone's software, in a simulated greenhouse</h2>
+        <p class="intro">Not a toy model: the drone is the FireFly 2 from its CAD, its flight controller is ArduCopter, and its
+          position comes from OpenVINS running on rendered camera images, exactly as on the hardware.</p>
+        <div class="split">
+          <div class="media"><img src="gazebo-window.jpg" alt="The Gazebo window: chase view of the drone in a lane, with live camera screens" loading="lazy" /></div>
+          <div class="text">
+            <h3>What is simulated</h3>
+            <ul>
+              <li><b>The FireFly 2</b> from its SolidWorks design: body, props, rotor positions, a D435i tilted 15° down, a Pi Camera Module 3 on the left.</li>
+              <li><b>A greenhouse</b> with procedural tomato rows, rails and posts; dead-end lanes closed by an end wall.</li>
+              <li><b>GPS-denied flight:</b> no GPS, no compass. OpenVINS → MAVLink odometry → ArduPilot EKF3.</li>
+              <li><b>A fast Python simulator</b> too, for the tests and for trying ideas in seconds.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="wide-img media"><img src="views/lane-views.png" alt="What the drone's cameras see in a lane: infrared, depth, Pi Camera" loading="lazy" /></div>
+        <p class="caption">What the drone sees in a lane: the D435i infrared image (OpenVINS), the depth image (lane perception; blue near, red far), and the Pi Camera on the crop row.</p>
+      </div>
+    </section>
+
+    <section id="editor">
+      <div class="wrap">
+        <p class="kicker">Behaviour tree editor</p>
+        <h2>Draw the mission. Run it. Watch every node.</h2>
+        <p class="intro">A web editor for the behaviour tree: React Flow in the browser, a FastAPI server running the same tree
+          code as the drone. Every node lights up as it runs and keeps its own log; a map draws the flight.</p>
+        <div class="media"><video src="media/editor-mission.mp4" poster="media/editor-mission.jpg" autoplay muted loop playsinline controls preload="metadata"></video></div>
+        <p class="caption">The full mission in the Python simulator at 20×: the running branch in amber, finished steps in green, the log and the map on the right.</p>
+        <div class="grid3" style="margin-top: 30px">
+          <div class="card"><h3>Edit as a graph</h3><p>Drag nodes from a palette, connect parent to child, set parameters. Children run top to bottom, as drawn. Impossible connections are refused as you draw.</p></div>
+          <div class="card"><h3>Checked by the server</h3><p>Unknown lanes, missing children, duplicate names, loose nodes: marked on the node as you edit. Run waits until the tree is right.</p></div>
+          <div class="card"><h3>Live, from any point</h3><p>Each run streams over a WebSocket: status changes, log lines, the pose every tick. Pages can join late or reconnect.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="gazebo-editor">
+      <div class="wrap">
+        <p class="kicker">Two simulators, one button</p>
+        <h2>From the editor straight into Gazebo</h2>
+        <p class="intro">Choose <i>Gazebo + ArduPilot + OpenVINS</i> in the run settings and the same tree flies the full chain.
+          The log then shows the flight stack next to the tree: ArduPilot's own messages, what the tree asks over MAVLink,
+          EKF3 taking its position from the visual odometry, and OpenVINS initialising.</p>
+        <div class="media"><video src="media/editor-gazebo.mp4" poster="media/editor-gazebo.jpg" autoplay muted loop playsinline controls preload="metadata"></video></div>
+        <p class="caption">Five lanes flown in Gazebo from the editor (start-up at 2×, the flight at 8×): setup, VIO, EKF3, ArduPilot and MAVLink messages, then the tree's steps while the map draws the flight. All five lanes swept, 46–78 mm from the lane centre.</p>
+      </div>
+    </section>
+
+    <section id="lanes">
+      <div class="wrap">
+        <div class="split flip">
+          <div class="text">
+            <p class="kicker">Lanes</p>
+            <h2>The greenhouse is fixed. The tree chooses the lanes.</h2>
+            <p><b>Lanes − 5 of 6 +</b> in the toolbar: <b>+</b> adds the next lane with the mission's exact steps (go to the
+              entry, align on the depth image, sweep in, turn round short of the end wall, sweep out, exit), <b>−</b> removes
+              the last one with all its steps.</p>
+            <p>Each lane's entry comes from the greenhouse map; the depth camera then centres the drone in the lane, whatever
+              the odometry drift.</p>
+          </div>
+          <div>
+            <div class="media"><video src="media/editor-lanes.mp4" poster="media/editor-lanes.jpg" autoplay muted loop playsinline controls preload="metadata"></video></div>
+            <p class="caption">Two lanes removed, one added back: the drone sweeps lanes 1–5 and goes home.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="failsafes">
+      <div class="wrap">
+        <div class="split">
+          <div>
+            <div class="media"><video src="media/editor-failsafe.mp4" poster="media/editor-failsafe.jpg" autoplay muted loop playsinline controls preload="metadata"></video></div>
+            <p class="caption">Start battery 45%: in lane 3 the guard fails and the failsafe flies home along the lane, never through the crop.</p>
+          </div>
+          <div class="text">
+            <p class="kicker">Failsafes</p>
+            <h2>Safety first, every tick</h2>
+            <p>A guard sits in front of the mission and is re-checked ten times a second. When a check fails, it interrupts
+              whatever runs:</p>
+            <ul>
+              <li><b>Battery at the reserve</b>: fly back out of the dead-end lane, home, land.</li>
+              <li><b>Visual odometry lost briefly</b>: hover and wait, then resume where the mission was.</li>
+              <li><b>Battery critical or odometry lost too long</b>: land where it is.</li>
+            </ul>
+            <p>Mission steps remember that they are done, so a pause never restarts the mission.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="how">
+      <div class="wrap">
+        <p class="kicker">How it works</p>
+        <h2>From camera pixels to motor commands</h2>
+        <p class="intro">Who decides what: OpenVINS says where the drone is, the depth camera says where the lane centre is, the
+          behaviour tree decides where to go, ArduCopter decides how to fly there.</p>
+        <div class="pipeline">
+          <div class="step"><b>RealSense D435i</b><span>infrared pair, IMU, depth</span></div>
+          <div class="step"><b>OpenVINS</b><span>visual-inertial odometry, no ROS</span></div>
+          <div class="step"><b>ArduPilot EKF3</b><span>external navigation, GPS-denied</span></div>
+          <div class="step"><b>Behaviour tree</b><span>+ lane perception on the depth image</span></div>
+          <div class="step"><b>ArduCopter</b><span>GUIDED velocity targets → motors</span></div>
+        </div>
+        <a class="media" style="background: #fff" href="bt/tree.png" title="open full size"><img src="bt/tree.png" alt="The mission's behaviour tree" loading="lazy" /></a>
+        <p class="caption">The mission's behaviour tree, drawn from the code: the safety guard and its failsafes on top, the mission below (lanes 2–6 collapsed). Click to enlarge.</p>
+        <div class="split" style="margin-top: 30px">
+          <a class="media" style="background: #fff" href="bt/lane.png" title="open full size"><img src="bt/lane.png" alt="One lane step by step" loading="lazy" /></a>
+          <div class="text">
+            <h3>One dead-end lane</h3>
+            <p>In to the turning point 1 m before the end wall, turn round on the spot, back out on the centre line, with the Pi
+              Camera seeing one crop row on the way in and the other on the way out.</p>
+            <p><a href="https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees/blob/editor/docs/how-it-works.md">The whole system, node by node →</a></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="results">
+      <div class="wrap">
+        <p class="kicker">Results</p>
+        <h2>Flown end to end, from a fresh clone</h2>
+        <div class="grid3">
+          <div class="card"><div class="num">6 / 6</div><h3>lanes, every run</h3><p>Three full missions of the FireFly in Gazebo with ArduPilot and OpenVINS, one set up from scratch with the guide.</p></div>
+          <div class="card"><div class="num">37–117 mm</div><h3>from the lane centre</h3><p>RMS against ground truth while sweeping; worst moment 0.36–0.52 m.</p></div>
+          <div class="card"><div class="num">~6½ min</div><h3>for six lanes</h3><p>371–393 s, in and back out of each dead-end lane, home and land.</p></div>
+        </div>
+        <div class="wide-img media" style="background: #fff"><img src="firefly-gazebo-run.png" alt="Planned, flown and estimated path of a Gazebo run" loading="lazy" /></div>
+        <p class="caption">A Gazebo run from above: planned path in green, where the drone flew in blue, where visual odometry believed it was in dashed orange.</p>
+      </div>
+    </section>
+
+    <section id="start">
+      <div class="wrap">
+        <p class="kicker">Get started</p>
+        <h2>Three levels, each adding to the last</h2>
+        <p class="intro">Clone the repository, then go as far as you need.
+          <a href="https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees/blob/editor/docs/setup.md">Full setup guide →</a></p>
+<pre><code>git clone https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees.git
+cd rowpilot-sim-behavior-trees && git checkout editor</code></pre>
+        <div class="levels">
+          <div class="card">
+            <h3>1 · Python simulator<small>any OS, 5 minutes</small></h3>
+<pre><code>python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev,plot]"
+python -m rowpilot run --out runs/nominal</code></pre>
+          </div>
+          <div class="card">
+            <h3>2 · The editor<small>+ Node.js 18</small></h3>
+<pre><code>cd web && npm ci
+npm run build && cd ..
+python -m rowpilot editor
+# http://127.0.0.1:8000</code></pre>
+          </div>
+          <div class="card">
+            <h3>3 · Gazebo + ArduPilot<small>Ubuntu 22.04, NVIDIA GPU</small></h3>
+<pre><code>./scripts/setup_ardupilot_sim.sh
+./scripts/run_ardupilot_sim.sh
+# or: Run settings → Gazebo
+#     in the editor</code></pre>
+          </div>
+        </div>
+        <table style="margin-top: 34px">
+          <tr><th>Document</th><th>What is in it</th></tr>
+          <tr><td><a href="https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees/blob/editor/docs/setup.md">Setup</a></td><td>setting up and running everything, stopping and cleaning up, troubleshooting</td></tr>
+          <tr><td><a href="https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees/blob/editor/docs/editor.md">Editor</a></td><td>using the behaviour tree editor, how it is built, its API</td></tr>
+          <tr><td><a href="https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees/blob/editor/docs/reference.md">Reference</a></td><td>every command, script, option and environment variable</td></tr>
+          <tr><td><a href="https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees/blob/editor/docs/how-it-works.md">How it works</a></td><td>the whole system, the tree node by node, perception, control, localization</td></tr>
+          <tr><td><a href="https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees/blob/editor/docs/deployment.md">Deployment</a></td><td>running it on the real drone</td></tr>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      rowpilot · MIT licence · <a href="https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees">github.com/NadaAbbas444/rowpilot-sim-behavior-trees</a>
+    </div>
+  </footer>
+</body>
+</html>

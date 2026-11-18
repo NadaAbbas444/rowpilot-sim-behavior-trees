@@ -2,7 +2,8 @@
 
 This document explains the whole system: what runs where, how the pieces talk to each other, how the
 behaviour tree flies the mission, and what every node does. The [README](../README.md) is the short
-version, with how to run things.
+version; how to set up and run everything is in [setup.md](setup.md), every command and option in
+[reference.md](reference.md), and the behaviour tree editor in [editor.md](editor.md).
 
 Contents
 1. [The big picture](#1-the-big-picture)
@@ -65,7 +66,7 @@ Who decides what:
 
 | What ROS would give | What rowpilot uses instead |
 |---|---|
-| Nodes | Separate processes: Gazebo, `vio_bridge` (C++, OpenVINS as a library), `imu_synth`, `rowpilot` (the tree), ArduCopter |
+| Nodes | Separate processes: Gazebo, `vio_bridge` (C++, OpenVINS as a library), `imu_synth`, `rowpilot` (the tree), ArduCopter; the editor's server, if it started the run |
 | Topics | **gz-transport**: Gazebo's own publish/subscribe (same idea: named topics, typed messages, many subscribers) |
 | Messages | **gz.msgs** (protobuf): `Image`, `IMU`, `Odometry`, `Pose_V`, `Clock` |
 | Talking to the flight controller (MAVROS) | **MAVLink** directly, with pymavlink |
@@ -415,12 +416,13 @@ targets do not make it climb (it disarms instead).
 
 | | Python simulator (`rowpilot/sim.py`) | ArduPilot SITL + Gazebo |
 |---|---|---|
-| Run | `python -m rowpilot run` | `./scripts/run_ardupilot_sim.sh` |
+| Run | `python -m rowpilot run`, or the editor (*Python simulator*) | `./scripts/run_ardupilot_sim.sh`, or the editor (*Gazebo + ArduPilot + OpenVINS*) |
 | Speed | a full mission in ~1 s | real time (~7 min for 6 lanes) |
 | Flight dynamics | velocity loop with ArduCopter's measured dead time and lag, gusts | ArduCopter + Gazebo physics with the FireFly model |
 | Localization | VO with random-walk drift and scripted dropouts | OpenVINS on rendered infrared images |
 | Depth | rays against the crop faces, row ends and end wall, with ragged foliage | Gazebo depth camera on procedural tomato plants |
 | Use | tests (CI), trying mission logic quickly | the real drone's software chain end to end |
+| Log | the tree's nodes | the tree's nodes, ArduPilot's messages, and (in the editor) MAVLink, EKF3 and OpenVINS progress |
 
 The behaviour tree, perception and control code are the same in both: they only see the `Vehicle`
 interface (`state`, `arm`, `send`, `land`, `depth_scan`; `rowpilot/vehicle.py`).
@@ -430,6 +432,8 @@ interface (`state`, `arm`, `send`, `land`, `depth_scan`; `rowpilot/vehicle.py`).
 | Run | Folder | Files |
 |---|---|---|
 | Python simulator | the `--out` folder you give, e.g. `runs/nominal/` | `path.png` (the path plot), `summary.json`, `events.jsonl`, `trace.csv` |
+| Editor, Python simulator | kept in the editor while it runs (the Log tab, the map) | not saved to disk |
+| Editor, Gazebo | `runs/editor-<date>-<time>-<id>/` | as a terminal Gazebo run, plus `tree.json` (the tree that flew) |
 | ArduPilot + Gazebo | `runs/ardupilot-<date>-<time>/` | `path.png`, `summary.json`, `events.jsonl`, `trace.json`, `logs/*.BIN` (ArduPilot dataflash log), `gazebo.log`, `arducopter.log`, `openvins.log`, `imu_synth.log` |
 | Camera views | `docs/views/` (or `--out`) | from `scripts/camera_views.py` |
 
@@ -500,6 +504,10 @@ Example: take a photo of every plant position.
 2. Read the world only from `self.ctx.s` (the tick's snapshot) and `self.ctx.lane`; act only through
    `self.ctx.send(Command(...))` or the vehicle's `land()` / `arm()`.
 3. Put it into `build_tree` where it belongs (e.g. after `Sweep in` in each lane's Sequence).
+   To offer it in the editor's palette too, add a `NodeType` for it to `NODE_TYPES` in
+   `rowpilot/editor/nodes.py` (its category, a one-line help, its parameters and a builder), and, if
+   the mission tree uses it, the same step to `_add_lane` / `default_graph` there:
+   `tests/test_editor.py` checks that the editor's mission tree still equals `build_tree`.
 4. Log with `self.log("...")`: it appears in the console, in `events.jsonl` and in the node's
    `feedback_message`.
 5. Add a test in `tests/test_mission.py` that runs a mission in the Python simulator and checks the

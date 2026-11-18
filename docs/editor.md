@@ -37,6 +37,11 @@ saves its results (logs, `path.png`, `summary.json`, the tree) in `runs/editor-<
 `cd web && npm run dev`, then open http://localhost:5173. Vite reloads the page on every change and
 passes `/api` (and the run's WebSocket) to the Python server.
 
+**Stopping:** Ctrl+C in the editor's terminal (this also stops a run it started). If a Gazebo run
+left processes behind (e.g. after closing the Gazebo window), see
+[setup.md: stopping and cleaning up](setup.md#stopping-and-cleaning-up); problems:
+[setup.md: troubleshooting](setup.md#troubleshooting). All options: [reference.md](reference.md).
+
 ## Using it
 
 | | |

@@ -12,13 +12,36 @@ Target hardware: the FireFly 2 quadcopter (2004 motors, 4-inch props, 4S Molicel
 
 The core of this repo is the part that does not depend on a simulator or the hardware: perception, control, the behaviour tree, and a lightweight simulator behind the same `Vehicle` interface the ArduPilot simulation uses. It runs anywhere with Python 3.10+ and is covered by tests and CI. The full simulation (ArduPilot SITL + Gazebo + OpenVINS, with the FireFly model) runs on Ubuntu 22.04.
 
-**New here? Start with [docs/setup.md](docs/setup.md)**: setting it up on your laptop, step by step.
+**See it in action: [the showcase page](https://nadaabbas444.github.io/rowpilot-sim-behavior-trees/)** (videos of the editor and the Gazebo flight).
+
+**New here? Start with [docs/setup.md](docs/setup.md)**: setting it up on your laptop and running everything, step by step.
+
+## Documentation
+
+| | |
+|---|---|
+| [docs/setup.md](docs/setup.md) | **set up and run everything**: the Python simulator, the editor, Gazebo + ArduPilot + OpenVINS; stopping and cleaning up; troubleshooting |
+| [docs/editor.md](docs/editor.md) | the behaviour tree editor: using it, how it is built, its API |
+| [docs/reference.md](docs/reference.md) | every command, script, option and environment variable; ports and processes |
+| [docs/how-it-works.md](docs/how-it-works.md) | the whole system: processes and topics, the behaviour tree node by node, failsafes, how the drone finds each lane, perception, control, localization, what each run saves |
+| [docs/bt/](docs/bt/) | behaviour tree diagrams |
+| [docs/deployment.md](docs/deployment.md) | running it on the real drone |
+
+## Quick start
+
+| | |
+|---|---|
+| Python simulator (any OS, 5 min) | `pip install -e ".[dev,plot]"` then `python -m rowpilot run --out runs/nominal` |
+| The editor (+ Node.js 18) | `cd web && npm ci && npm run build && cd ..` then `python -m rowpilot editor`, open http://127.0.0.1:8000 |
+| Gazebo + ArduPilot + OpenVINS (Ubuntu 22.04) | `./scripts/setup_ardupilot_sim.sh` once, then `./scripts/run_ardupilot_sim.sh` or *Run settings → Gazebo* in the editor |
+
+Full steps: [docs/setup.md](docs/setup.md).
 
 ![Low-battery run: three lanes swept, then back home along a lane and landed](docs/low-battery-run.png)
 
 *`python -m rowpilot run --battery 45`: the battery reaches the reserve in lane 3, so the tree turns round, flies back out of the dead-end lane (never through the crop) and home, and lands. Blue is the true path; dashed orange is what visual odometry believed.*
 
-## Run it
+## Run it (Python simulator)
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate   # Ubuntu: sudo apt install python3-venv if missing
