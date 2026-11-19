@@ -14,29 +14,30 @@
   <meta name="twitter:card" content="summary_large_image" />
   <style>
     :root {
-      --bg: #f7f8f5;
+      /* colours from the rowpilot logo: drone orange, frame blue, navy */
+      --bg: #f5f8fb;
       --panel: #ffffff;
-      --ink: #1b231c;
-      --muted: #5d6b60;
-      --line: #dfe4dc;
-      --accent: #2f7d3b;
-      --accent-2: #c2410c;
-      --code: #eef1ec;
-      --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 28px rgba(20, 40, 20, 0.08);
+      --ink: #141c26;
+      --muted: #5a6676;
+      --line: #dce3eb;
+      --accent: #2373a8;
+      --accent-2: #d9472b;
+      --code: #ecf1f6;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 28px rgba(17, 26, 36, 0.09);
       --logo-row: #ef5a3c;
       --logo-pilot: #2f86c4;
       color-scheme: light;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #111511;
-        --panel: #181e19;
-        --ink: #e6ece6;
-        --muted: #9aa89c;
-        --line: #2a332b;
-        --accent: #6fc47c;
-        --accent-2: #f08a4b;
-        --code: #1f271f;
+        --bg: #111a24;
+        --panel: #172331;
+        --ink: #e8eef5;
+        --muted: #9aa8b8;
+        --line: #26364a;
+        --accent: #5aafe0;
+        --accent-2: #ef5a3c;
+        --code: #1b2a3a;
         --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 28px rgba(0, 0, 0, 0.35);
         --logo-pilot: #5aafe0;
         color-scheme: dark;
@@ -62,21 +63,21 @@
     .brand img { width: 30px; height: 30px; display: block; }
     .brand b { color: var(--logo-pilot); }
     .hero-logo { display: block; width: min(440px, 100%); height: auto; margin: 0 0 28px -14px; }
-    @media (prefers-color-scheme: dark) { .hero-logo { margin-left: 0; border-radius: 16px; } }
+    @media (prefers-color-scheme: dark) { .hero-logo { margin-left: -14px; } }
     nav { display: flex; gap: 18px; margin-left: auto; font-size: 15px; overflow-x: auto; }
     nav a { color: var(--muted); text-decoration: none; white-space: nowrap; }
     nav a:hover { color: var(--ink); }
 
     .hero { padding: 64px 0 32px; }
     .hero h1 { font-size: clamp(32px, 5vw, 54px); line-height: 1.08; margin: 0 0 18px; letter-spacing: -0.02em; }
-    .hero h1 em { font-style: normal; color: var(--accent); }
+    .hero h1 em { font-style: normal; color: var(--accent-2); }
     .hero p.lead { font-size: 20px; color: var(--muted); max-width: 760px; margin: 0 0 26px; }
     .buttons { display: flex; gap: 12px; flex-wrap: wrap; }
     .btn {
       display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px; font-weight: 600;
       text-decoration: none; border: 1px solid var(--line); color: var(--ink); background: var(--panel);
     }
-    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
     .btn:hover { filter: brightness(1.05); }
     .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 26px 0 0; padding: 0; list-style: none; }
     .chips li { font-size: 14px; padding: 4px 11px; border-radius: 99px; background: var(--code); color: var(--muted); }
