@@ -1,5 +1,12 @@
 # rowpilot-sim-behavior-trees
 
+<p align="center">
+  <picture>
+    <source srcset="docs/logo/rowpilot-logo-dark.png" media="(prefers-color-scheme: dark)" />
+    <img src="docs/logo/rowpilot-logo.png" alt="rowpilot: greenhouse drone &amp; simulator" width="520" />
+  </picture>
+</p>
+
 [![Tests](https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees/actions/workflows/test.yml/badge.svg)](https://github.com/NadaAbbas444/rowpilot-sim-behavior-trees/actions/workflows/test.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776ab)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)

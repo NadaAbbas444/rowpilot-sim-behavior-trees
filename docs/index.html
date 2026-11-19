@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>rowpilot: a GPS-denied greenhouse drone flown by a behaviour tree</title>
   <meta name="description" content="A drone that sweeps greenhouse lanes without GPS: visual-inertial odometry, lane-centric control, a behaviour tree, ArduPilot SITL + Gazebo simulation and a live behaviour tree editor." />
+  <link rel="icon" type="image/png" sizes="64x64" href="favicon.png" />
+  <link rel="icon" href="favicon.ico" sizes="32x32" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <meta property="og:title" content="rowpilot: greenhouse drone &amp; simulator" />
+  <meta property="og:description" content="A GPS-denied greenhouse drone flown by a behaviour tree, with an ArduPilot + Gazebo simulation and a live behaviour tree editor." />
+  <meta property="og:image" content="https://nadaabbas444.github.io/rowpilot-sim-behavior-trees/logo/rowpilot-banner.png" />
+  <meta name="twitter:card" content="summary_large_image" />
   <style>
     :root {
       --bg: #f7f8f5;
@@ -16,6 +23,8 @@
       --accent-2: #c2410c;
       --code: #eef1ec;
       --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 28px rgba(20, 40, 20, 0.08);
+      --logo-row: #ef5a3c;
+      --logo-pilot: #2f86c4;
       color-scheme: light;
     }
     @media (prefers-color-scheme: dark) {
@@ -29,6 +38,7 @@
         --accent-2: #f08a4b;
         --code: #1f271f;
         --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 28px rgba(0, 0, 0, 0.35);
+        --logo-pilot: #5aafe0;
         color-scheme: dark;
       }
     }
@@ -45,8 +55,14 @@
       backdrop-filter: blur(8px); border-bottom: 1px solid var(--line);
     }
     header.top .wrap { display: flex; align-items: center; gap: 20px; height: 56px; }
-    .brand { font-weight: 800; letter-spacing: -0.01em; text-decoration: none; color: var(--ink); }
-    .brand span { color: var(--accent); }
+    .brand {
+      display: inline-flex; align-items: center; gap: 8px; flex: none;
+      font-weight: 800; letter-spacing: 0.02em; text-decoration: none; color: var(--logo-row);
+    }
+    .brand img { width: 30px; height: 30px; display: block; }
+    .brand b { color: var(--logo-pilot); }
+    .hero-logo { display: block; width: min(440px, 100%); height: auto; margin: 0 0 28px -14px; }
+    @media (prefers-color-scheme: dark) { .hero-logo { margin-left: 0; border-radius: 16px; } }
     nav { display: flex; gap: 18px; margin-left: auto; font-size: 15px; overflow-x: auto; }
     nav a { color: var(--muted); text-decoration: none; white-space: nowrap; }
     nav a:hover { color: var(--ink); }
@@ -137,7 +153,7 @@
 <body>
   <header class="top">
     <div class="wrap">
-      <a class="brand" href="#">row<span>pilot</span></a>
+      <a class="brand" href="#"><img src="logo/rowpilot-mark-128.png" alt="" width="30" height="30" /><span>ROW<b>PILOT</b></span></a>
       <nav>
         <a href="#simulation">Simulation</a>
         <a href="#editor">Editor</a>
@@ -152,6 +168,10 @@
 
   <main>
     <div class="wrap hero">
+      <picture>
+        <source srcset="logo/rowpilot-logo-dark.png" media="(prefers-color-scheme: dark)" />
+        <img class="hero-logo" src="logo/rowpilot-logo.png" alt="rowpilot: greenhouse drone &amp; simulator" width="1320" height="400" />
+      </picture>
       <h1>A greenhouse drone that flies <em>without GPS</em>, run by a behaviour tree.</h1>
       <p class="lead">
         rowpilot sweeps the dead-end lanes between crop rows: visual-inertial odometry tells it where it is, the
