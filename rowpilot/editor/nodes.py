@@ -62,7 +62,6 @@ from ..trolley import (
     ReverseOut,
     Stop,
     StopHere,
-    TrolleySim,
 )
 
 GRAPH_VERSION = 1
@@ -74,8 +73,8 @@ ROBOT_NAMES = {"drone": "the drone", "trolley": "the pipe-rail trolley"}
 
 
 def robot_of(ctx: MissionContext) -> str:
-    """The robot a mission context drives."""
-    return "trolley" if isinstance(ctx.vehicle, TrolleySim) else "drone"
+    """The robot a mission context drives: its vehicle says (TrolleySim and TrolleyGazebo: "trolley")."""
+    return getattr(ctx.vehicle, "robot", "drone")
 
 
 @dataclass(frozen=True)

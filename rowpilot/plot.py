@@ -39,7 +39,7 @@ def plot_run(result: RunResult, layout: GreenhouseLayout, path: str, robot: str 
         color="#e08a1e",
         lw=1,
         ls="--",
-        label="visual odometry estimate",
+        label="estimate (rails + wheel odometry)" if robot == "trolley" else "visual odometry estimate",
     )
     ax.plot(xs, ys, color="#1f5fa8", lw=1.4, label="true path")
     hx, hy = layout.home

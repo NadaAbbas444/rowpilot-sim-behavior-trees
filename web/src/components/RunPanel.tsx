@@ -1,6 +1,6 @@
-import { useState } from "react";
-import type { RunView } from "../runState";
-import type { Settings, Simulators } from "../types";
+import { useState } from 'react';
+import type { RunView } from '../runState';
+import type { Settings, Simulators } from '../types';
 
 interface Props {
   settings: Settings;
@@ -9,36 +9,29 @@ interface Props {
   simulators: Simulators | null;
 }
 
-type NumKey = {
-  [K in keyof Settings]: Settings[K] extends number ? K : never;
-}[keyof Settings];
+type NumKey = { [K in keyof Settings]: Settings[K] extends number ? K : never }[keyof Settings];
 
 type Field = [NumKey, string, string, number];
 const GREENHOUSE: Field[] = [
-  [
-    "lanes",
-    "lanes",
-    "how many lanes the greenhouse has (6 in the real one); the tree chooses which to sweep: Lanes − + in the toolbar",
-    1,
-  ],
-  ["row_length", "row length (m)", "", 0.1],
-  ["path_width", "lane width (m)", "free width between the crop faces", 0.1],
+  ['lanes', 'lanes', 'how many lanes the greenhouse has (6 in the real one); the tree chooses which to sweep: Lanes − + in the toolbar', 1],
+  ['row_length', 'row length (m)', '', 0.1],
+  ['path_width', 'lane width (m)', 'free width between the crop faces', 0.1],
 ];
 const MISSION: Field[] = [
-  ["altitude", "altitude (m)", "", 0.1],
-  ["sweep_speed", "sweep speed (m/s)", "", 0.1],
+  ['altitude', 'altitude (m)', '', 0.1],
+  ['sweep_speed', 'sweep speed (m/s)', '', 0.1],
 ];
 const PYTHON_ONLY: Field[] = [
-  ["battery", "start battery (%)", "45 shows the low-battery failsafe", 1],
-  ["wind", "gusts (m/s)", "", 0.1],
-  ["seed", "random seed", "wind, odometry drift and depth noise", 1],
-  ["max_time_s", "time limit (s)", "simulated time", 10],
+  ['battery', 'start battery (%)', '45 shows the low-battery failsafe', 1],
+  ['wind', 'gusts (m/s)', '', 0.1],
+  ['seed', 'random seed', 'wind, odometry drift and depth noise', 1],
+  ['max_time_s', 'time limit (s)', 'simulated time', 10],
 ];
 
 function parseDropouts(s: string): [number, number][] | null {
   if (!s.trim()) return [];
   const out: [number, number][] = [];
-  for (const part of s.split(",")) {
+  for (const part of s.split(',')) {
     const m = /^\s*(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\s*$/.exec(part);
     if (!m) return null;
     out.push([Number(m[1]), Number(m[2])]);
@@ -46,21 +39,14 @@ function parseDropouts(s: string): [number, number][] | null {
   return out;
 }
 
-export default function RunPanel({
-  settings,
-  onChange,
-  run,
-  simulators,
-}: Props) {
-  const [dropText, setDropText] = useState(
-    settings.vo_dropouts.map(([a, b]) => `${a}:${b}`).join(", "),
-  );
+export default function RunPanel({ settings, onChange, run, simulators }: Props) {
+  const [dropText, setDropText] = useState(settings.vo_dropouts.map(([a, b]) => `${a}:${b}`).join(', '));
   const dropOk = parseDropouts(dropText) !== null;
   const s = run.summary;
-  const gz = simulators?.gazebo;
-  const gazebo = settings.simulator === "gazebo";
-  const trolley = settings.robot === "trolley";
-  const running = run.phase === "running";
+  const trolley = settings.robot === 'trolley';
+  const gz = trolley ? simulators?.gazebo_trolley : simulators?.gazebo;
+  const gazebo = settings.simulator === 'gazebo';
+  const running = run.phase === 'running';
   const numField = ([key, label, help, step]: Field) => (
     <div className="field" key={key}>
       <label htmlFor={`set-${key}`}>{label}</label>
@@ -69,9 +55,7 @@ export default function RunPanel({
         type="number"
         step={step}
         value={Math.round(settings[key] * 1000) / 1000}
-        onChange={(e) =>
-          onChange({ ...settings, [key]: Number(e.target.value) })
-        }
+        onChange={(e) => onChange({ ...settings, [key]: Number(e.target.value) })}
       />
       {help && <small>{help}</small>}
     </div>
@@ -79,7 +63,7 @@ export default function RunPanel({
   return (
     <div className="runpanel">
       {s && (
-        <div className={`summary ${s.outcome === "completed" ? "ok" : "bad"}`}>
+        <div className={`summary ${s.outcome === 'completed' ? 'ok' : 'bad'}`}>
           <h4>{s.outcome}</h4>
           <dl>
             <dt>lanes swept</dt>
@@ -98,95 +82,79 @@ export default function RunPanel({
       {run.error && <p className="issues">{run.error}</p>}
       <h4>Robot</h4>
       <div className="sim-choice" role="radiogroup" aria-label="Robot">
-        <label className={trolley ? "" : "on"}>
+        <label className={trolley ? '' : 'on'}>
           <input
             type="radio"
             name="robot"
             checked={!trolley}
             disabled={running}
-            onChange={() => onChange({ ...settings, robot: "drone" })}
+            onChange={() => onChange({ ...settings, robot: 'drone' })}
           />
           <b>FireFly 2 drone</b>
-          <small>
-            Flies the lanes on the centre line its depth camera sees; turns
-            round at the dead end.
-          </small>
+          <small>Flies the lanes on the centre line its depth camera sees; turns round at the dead end.</small>
         </label>
-        <label className={trolley ? "on" : ""}>
+        <label className={trolley ? 'on' : ''}>
           <input
             type="radio"
             name="robot"
             checked={trolley}
             disabled={running}
-            onChange={() =>
-              onChange({ ...settings, robot: "trolley", simulator: "python" })
-            }
+            onChange={() => onChange({ ...settings, robot: 'trolley' })}
           />
           <b>Pipe-rail trolley</b>
           <small>
-            Rides the heating pipes in each lane and reverses out; drives on the
-            concrete in the headland. Plain motor control. Python simulator
-            only, so far. Changing robot loads its mission tree.
+            Rides the heating pipes in each lane and reverses out; drives on the concrete in the headland. Plain motor
+            control (no ArduPilot). Changing robot loads its mission tree.
           </small>
         </label>
       </div>
       <h4>Simulator</h4>
       <div className="sim-choice" role="radiogroup" aria-label="Simulator">
-        <label className={settings.simulator === "python" ? "on" : ""}>
+        <label className={settings.simulator === 'python' ? 'on' : ''}>
           <input
             type="radio"
             name="simulator"
-            checked={settings.simulator === "python"}
+            checked={settings.simulator === 'python'}
             disabled={running}
-            onChange={() => onChange({ ...settings, simulator: "python" })}
+            onChange={() => onChange({ ...settings, simulator: 'python' })}
           />
           <b>Python simulator</b>
           <small>
-            Fast, any speed. The tree, lane perception and control against a
-            modelled {trolley ? "trolley" : "drone"}; no Gazebo, ArduPilot or
-            OpenVINS.
+            Fast, any speed. The tree, lane perception and control against a modelled {trolley ? 'trolley' : 'drone'};
+            no Gazebo, ArduPilot or OpenVINS.
           </small>
         </label>
-        <label
-          className={`${settings.simulator === "gazebo" ? "on" : ""} ${gz?.available === false ? "off" : ""}`}
-        >
+        <label className={`${settings.simulator === 'gazebo' ? 'on' : ''} ${gz?.available === false ? 'off' : ''}`}>
           <input
             type="radio"
             name="simulator"
-            checked={settings.simulator === "gazebo"}
-            disabled={running || !gz?.available || trolley}
-            onChange={() => onChange({ ...settings, simulator: "gazebo" })}
+            checked={settings.simulator === 'gazebo'}
+            disabled={running || !gz?.available}
+            onChange={() => onChange({ ...settings, simulator: 'gazebo' })}
           />
-          <b>Gazebo + ArduPilot + OpenVINS</b>
+          <b>{trolley ? 'Gazebo + OpenVINS' : 'Gazebo + ArduPilot + OpenVINS'}</b>
           <small>
-            The full chain, as on the drone: the Gazebo window with the drone
-            and its cameras, ArduCopter SITL arming and flying, OpenVINS on the
-            D435i images. Real time; about a minute to start.
+            {trolley
+              ? 'The Gazebo window with the trolley and its cameras, OpenVINS on the D435i images, the tree driving ' +
+                'the motors and a rail supervisor keeping the rails. Real time; about a minute to start.'
+              : 'The full chain, as on the drone: the Gazebo window with the drone and its cameras, ArduCopter SITL ' +
+                'arming and flying, OpenVINS on the D435i images. Real time; about a minute to start.'}
           </small>
-          {trolley && (
-            <small className="warn-text">The drone only, so far.</small>
-          )}
           {gz && !gz.available && (
             <small className="warn-text">
-              Not set up on this computer: missing {gz.missing.join("; ")}. See
-              docs/setup.md, level 2.
+              Not set up on this computer: missing {gz.missing.join('; ')}. See docs/setup.md, level 2.
             </small>
           )}
         </label>
       </div>
       {gazebo && (
         <>
-          <div className="field">
+          <div className="field" hidden={trolley}>
             <label htmlFor="set-vehicle">drone</label>
             <select
               id="set-vehicle"
               value={settings.vehicle}
-              onChange={(e) =>
-                onChange({
-                  ...settings,
-                  vehicle: e.target.value as Settings["vehicle"],
-                })
-              }
+              onChange={(e) => onChange({ ...settings, vehicle: e.target.value as Settings['vehicle'] })}
             >
               <option value="firefly">FireFly 2 (the real drone)</option>
               <option value="iris">ArduPilot Iris</option>
@@ -198,14 +166,9 @@ export default function RunPanel({
               id="set-window"
               type="checkbox"
               checked={settings.gazebo_window}
-              onChange={(e) =>
-                onChange({ ...settings, gazebo_window: e.target.checked })
-              }
+              onChange={(e) => onChange({ ...settings, gazebo_window: e.target.checked })}
             />
-            <small>
-              the 3D view following the drone, with live screens of its cameras;
-              off runs headless
-            </small>
+            <small>the 3D view following the {trolley ? 'trolley' : 'drone'}, with live screens of its cameras; off runs headless</small>
           </div>
         </>
       )}
@@ -216,32 +179,22 @@ export default function RunPanel({
           id="open-ends"
           type="checkbox"
           checked={settings.open_ends}
-          onChange={(e) =>
-            onChange({ ...settings, open_ends: e.target.checked })
-          }
+          onChange={(e) => onChange({ ...settings, open_ends: e.target.checked })}
         />
-        <small>
-          off: dead-end lanes, as in the real greenhouse (in, turn round, back
-          out)
-        </small>
+        <small>off: dead-end lanes, as in the real greenhouse (in, turn round, back out)</small>
       </div>
       {GREENHOUSE.map(numField)}
       <h4>Mission</h4>
-      {MISSION.filter(([k]) => !(trolley && k === "altitude")).map(numField)}
+      {MISSION.filter(([k]) => !(trolley && k === 'altitude')).map(numField)}
       <h4>Python simulator only</h4>
-      {gazebo && (
-        <p className="muted small">
-          In Gazebo, the battery, wind and camera come from the simulation
-          itself.
-        </p>
-      )}
+      {gazebo && <p className="muted small">In Gazebo, the battery, wind and camera come from the simulation itself.</p>}
       <fieldset disabled={gazebo}>
-        {PYTHON_ONLY.filter(([k]) => !(trolley && k === "wind")).map(numField)}
+        {PYTHON_ONLY.filter(([k]) => !(trolley && k === 'wind')).map(numField)}
         <div className="field">
           <label htmlFor="set-dropouts">visual odometry dropouts</label>
           <input
             id="set-dropouts"
-            className={dropOk ? "" : "invalid"}
+            className={dropOk ? '' : 'invalid'}
             placeholder="start:seconds, e.g. 60:1.5, 200:10"
             value={dropText}
             onChange={(e) => {
@@ -252,8 +205,8 @@ export default function RunPanel({
           />
           <small>
             {trolley
-              ? "on the concrete: a short one is waited out, one longer than 3 s stops the trolley; on the rails it does not matter"
-              : "a short one is waited out (hover); one longer than 3 s lands the drone"}
+              ? 'on the concrete: a short one is waited out, one longer than 3 s stops the trolley; on the rails it does not matter'
+              : 'a short one is waited out (hover); one longer than 3 s lands the drone'}
           </small>
         </div>
       </fieldset>

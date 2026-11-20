@@ -25,9 +25,11 @@ def logs(events, word):
 
 
 def at_dock(res, layout=None):
+    """Back at the dock. Within 0.3 m: from the last lane to the dock it goes by wheel odometry alone, up to
+    10 m with turns and no rail start on the way to re-localize it (a dock's own guide does the rest)."""
     layout = layout or GreenhouseLayout()
     end = res.trace[-1]
-    return math.hypot(end["x"] - layout.home[0], end["y"] - layout.home[1]) < 0.15
+    return math.hypot(end["x"] - layout.home[0], end["y"] - layout.home[1]) < 0.3
 
 
 # ---- the simulated trolley ----------------------------------------------------------------------

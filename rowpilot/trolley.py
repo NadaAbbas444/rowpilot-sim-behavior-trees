@@ -12,9 +12,11 @@ How it moves (TrolleySim):
     collision with the rail ends;
   - on the rails: forward and back only, no steering, it cannot leave the lane; past the rail end it
     derails (a crash); reversing until its front is off the rail start puts it back on the concrete.
-How it knows where it is: on the concrete, visual odometry (drifts, can drop out, as the drone's); on
-the rails, the rails fix its position across the lane and its heading, and the wheels measure how far
-along it is. Every rail start is a landmark: mounting re-localizes it (the drift is gone).
+How it knows where it is: on the rails, the rails fix its position across the lane and its heading, and
+the wheels measure how far along it is; on the concrete, its wheel odometry, from where it left the rails
+(or the dock): a short trip (WheelOdometry). Visual odometry (OpenVINS) runs too, as an independent check:
+lost for long on the concrete, the trolley stops (it cannot tell whether its wheels slip). In Gazebo,
+OpenVINS on the trolley was 10-20 cm off after every start and stop, which is why the wheels lead.
 
 The mission (build_trolley_tree), per lane: GoToRailStart -> MountRail -> DriveAlongRail (to the rail
 end, stopping for anything in the way) -> ReverseOut (back off the rails; the lane is done), then home to
@@ -67,6 +69,11 @@ class TrolleyConfig:
     rail_tol_m: float = 0.06  # lined up this well with the rails to mount (the rail starts' lead-in guides it)
     rail_tol_deg: float = 4.0
     odometry_noise_per_sqrt_m: float = 0.002  # wheel odometry along the rail
+    # wheel odometry on the concrete: a scale error per run (tyres), noise per metre and per radian turned
+    wheel_scale_err: float = 0.005
+    wheel_turn_err: float = 0.01
+    wheel_noise_per_sqrt_m: float = 0.003
+    wheel_turn_noise_per_sqrt_rad: float = 0.005
     idle_drain_pct_s: float = 0.01  # electronics and sensors
     move_drain_pct_per_m: float = 0.04
     # Things in the way, (x, y, radius, from s, until s): a worker, a harvest trolley in a lane.
@@ -106,8 +113,93 @@ def planned_route(layout: GreenhouseLayout, cfg: TrolleyConfig | None = None) ->
     return route + [dock_xy(layout)]
 
 
+# ---- the rails' rules: shared by the Python simulator (TrolleySim) and Gazebo (trolley_gazebo.py) ----------
+
+
+def footprint(x: float, y: float, yaw: float, cfg: TrolleyConfig) -> np.ndarray:
+    """Corners and edge midpoints of the chassis, map frame."""
+    h, w = cfg.length / 2, cfg.width / 2
+    pts = np.array([[a * h, b * w] for a in (-1, 0, 1) for b in (-1, 0, 1) if (a, b) != (0, 0)])
+    c, s = math.cos(yaw), math.sin(yaw)
+    return pts @ np.array([[c, s], [-s, c]]) + [x, y]
+
+
+def front(x: float, y: float, yaw: float, cfg: TrolleyConfig) -> tuple[float, float]:
+    h = cfg.length / 2
+    return x + h * math.cos(yaw), y + h * math.sin(yaw)
+
+
+def near_wall_x(layout: GreenhouseLayout) -> float:
+    """The near facade (gazebo_world.infrastructure)."""
+    return layout.home[0] - 2.0
+
+
+def mount(layout: GreenhouseLayout, cfg: TrolleyConfig, x: float, y: float, yaw: float) -> tuple[int | None, str]:
+    """The chassis has just reached the rail start (x = 0) driving forwards: (the lane whose rails it is
+    now on, "") if lined up with them; (None, crash reason) if it hit the rail start badly lined up;
+    (None, "") if it is not at a lane (the floor collision check then decides)."""
+    fy = front(x, y, yaw, cfg)[1]
+    lane = layout.nearest_lane(fy)
+    if abs(fy - layout.lane_center_y(lane)) > layout.path_width / 2:
+        return None, ""
+    lined_up = abs(y - layout.lane_center_y(lane)) <= cfg.rail_tol_m and abs(yaw) <= math.radians(cfg.rail_tol_deg)
+    return (lane, "") if lined_up else (None, "hit the rail start badly lined up")
+
+
+def floor_collision(layout: GreenhouseLayout, cfg: TrolleyConfig, x: float, y: float, yaw: float) -> str:
+    """Why the chassis, on the concrete, is touching something ("" if it is not)."""
+    y0, y1 = -layout.pitch - 1.0, layout.n_lanes * layout.pitch + 1.0
+    for px, py in footprint(x, y, yaw, cfg):
+        if layout.in_crop(px, py):
+            return "drove into a crop row"
+        if px < near_wall_x(layout) or not (y0 < py < y1):
+            return "drove into the greenhouse wall"
+        if px > 0.0:  # only on the rails past the rail start
+            return "drove onto the rails off the concrete"
+    return ""
+
+
+def derailed(layout: GreenhouseLayout, cfg: TrolleyConfig, x: float) -> bool:
+    """On the rails (heading along +x), past the end of them."""
+    return x + cfg.length / 2 > layout.row_length - 0.05
+
+
+def off_rail_start(cfg: TrolleyConfig, x: float) -> bool:
+    """On the rails, reversed until the front is off the rail start: back on the concrete."""
+    return x + cfg.length / 2 < 0.0
+
+
+class WheelOdometry:
+    """Dead reckoning from the wheel encoders on the concrete, from the last known pose (the dock, or where
+    the trolley left the rails). Errors: a scale error per run on distance and on turning (tyre wear and
+    pressure, turning on the spot), and noise per metre and per radian (slip)."""
+
+    def __init__(self, cfg: TrolleyConfig, rng: np.random.Generator, x: float, y: float, yaw: float):
+        self.cfg, self.rng = cfg, rng
+        self.scale = 1.0 + rng.normal(0, cfg.wheel_scale_err)
+        self.turn_scale = 1.0 + rng.normal(0, cfg.wheel_turn_err)
+        self.reset(x, y, yaw)
+
+    def reset(self, x: float, y: float, yaw: float) -> None:
+        self.x, self.y, self.yaw = x, y, yaw
+
+    def update(self, v: float, w: float, dt: float) -> None:
+        c = self.cfg
+        ds, dyaw = v * dt * self.scale, w * dt * self.turn_scale
+        if ds:
+            ds += self.rng.normal(0, c.wheel_noise_per_sqrt_m * math.sqrt(abs(v) * dt))
+        if dyaw:
+            dyaw += self.rng.normal(0, c.wheel_turn_noise_per_sqrt_rad * math.sqrt(abs(w) * dt))
+        mid = self.yaw + dyaw / 2
+        self.x += ds * math.cos(mid)
+        self.y += ds * math.sin(mid)
+        self.yaw = (self.yaw + dyaw + math.pi) % (2 * math.pi) - math.pi
+
+
 class TrolleySim(SimVehicle):
     """The pipe-rail trolley in the greenhouse; the Vehicle interface, as SimVehicle for the drone."""
+
+    robot = "trolley"
 
     def __init__(self, layout: GreenhouseLayout, cfg: SimConfig | None = None, trolley: TrolleyConfig | None = None):
         super().__init__(layout, cfg)
@@ -118,19 +210,14 @@ class TrolleySim(SimVehicle):
         self.rail: int | None = None
         self.crash_reason: str | None = None
         self.odo_err = 0.0
-        self._wall_x = layout.home[0] - 2.0  # the near facade (gazebo_world.infrastructure)
+        self.wheels = WheelOdometry(self.tc, np.random.default_rng(7000 + self.cfg.seed), self.x, self.y, self.yaw)
 
     # ---- geometry --------------------------------------------------------------------------
     def _front(self) -> tuple[float, float]:
-        h = self.tc.length / 2
-        return self.x + h * math.cos(self.yaw), self.y + h * math.sin(self.yaw)
+        return front(self.x, self.y, self.yaw, self.tc)
 
     def _footprint(self) -> np.ndarray:
-        """Corners and edge midpoints of the chassis, map frame."""
-        h, w = self.tc.length / 2, self.tc.width / 2
-        pts = np.array([[a * h, b * w] for a in (-1, 0, 1) for b in (-1, 0, 1) if (a, b) != (0, 0)])
-        c, s = math.cos(self.yaw), math.sin(self.yaw)
-        return pts @ np.array([[c, s], [-s, c]]) + [self.x, self.y]
+        return footprint(self.x, self.y, self.yaw, self.tc)
 
     def _camera_xy(self) -> tuple[float, float]:
         return self._front()
@@ -166,10 +253,8 @@ class TrolleySim(SimVehicle):
     def state(self) -> VehicleState:
         if self.rail is not None:  # rails: across-lane position and heading fixed, distance from the wheels
             ex, ey, eyaw = self.x + self.odo_err, self.y, 0.0
-            self._frozen_estimate = (ex, ey, eyaw)
-        else:
-            base = super().state()
-            ex, ey, eyaw = base.x, base.y, base.yaw
+        else:  # the concrete: wheel odometry since the rails or the dock
+            ex, ey, eyaw = self.wheels.x, self.wheels.y, self.wheels.yaw
         return VehicleState(
             self.t, ex, ey, 0.0, eyaw, self.vo_healthy(), self.battery, self.armed, self.landed, self.rail
         )
@@ -189,7 +274,7 @@ class TrolleySim(SimVehicle):
         self.v = self.w = 0.0
 
     def step(self, dt: float) -> None:
-        c, tc = self.cfg, self.tc
+        tc = self.tc
         self.t += dt
         self.battery = max(0.0, self.battery - tc.idle_drain_pct_s * dt)
         if not self.armed or self.crashed or self.battery <= 0:
@@ -204,57 +289,33 @@ class TrolleySim(SimVehicle):
         if self.rail is not None:
             self.x += self.v * dt
             self.odo_err += self.rng.normal(0, tc.odometry_noise_per_sqrt_m * math.sqrt(dist)) if dist else 0.0
-            if self._front()[0] > self.layout.row_length - 0.05:
+            if derailed(self.layout, tc, self.x):
                 self._crash("ran off the end of the rails")
-            elif self._front()[0] < 0.0:  # reversed off the rail start
+            elif off_rail_start(tc, self.x):  # leaves the rails knowing where it is: the wheels take over
+                self.wheels.reset(self.x + self.odo_err, self.layout.lane_center_y(self.rail), 0.0)
                 self.rail = None
-                self.drift[:] = 0.0  # leaves the rails knowing exactly where it is
         else:
             self.yaw = (self.yaw + self.w * dt + math.pi) % (2 * math.pi) - math.pi
             self.x += self.v * math.cos(self.yaw) * dt
             self.y += self.v * math.sin(self.yaw) * dt
-            if dist > 0:
-                self.drift[:2] += self.rng.normal(0, c.vo_drift_per_sqrt_m * math.sqrt(dist), 2)
-                self.drift[2] += self.rng.normal(0, c.vo_yaw_drift_per_sqrt_m * math.sqrt(dist))
-            if lead_before < 0.0 <= self._footprint()[:, 0].max() and self.v > 0:
-                self._try_mount(self._front()[1])  # the chassis reaches the rail start
+            self.wheels.update(self.v, self.w, dt)
+            if lead_before < 0.0 <= self._footprint()[:, 0].max() and self.v > 0:  # reaches the rail start
+                lane, why = mount(self.layout, tc, self.x, self.y, self.yaw)
+                if why:
+                    self._crash(why)
+                elif lane is not None:
+                    self.rail = lane
+                    self.y, self.yaw, self.w = self.layout.lane_center_y(lane), 0.0, 0.0
+                    self.odo_err = 0.0
             if not self.crashed and self.rail is None:
-                self._check_floor_collisions()
+                why = floor_collision(self.layout, tc, self.x, self.y, self.yaw)
+                if why:
+                    self._crash(why)
         if not self.crashed:
             for ox, oy, r in self._active_obstacles():
                 if np.min(np.hypot(*(self._footprint() - [ox, oy]).T)) < r:
                     self._crash("ran into an obstacle")
         self.battery = max(0.0, self.battery - tc.move_drain_pct_per_m * dist)
-
-    def _try_mount(self, front_y: float) -> None:
-        lay, tc = self.layout, self.tc
-        lane = lay.nearest_lane(front_y)
-        if abs(front_y - lay.lane_center_y(lane)) > lay.path_width / 2:
-            return  # not at a lane: the floor collision check decides
-        aligned = abs(self.y - lay.lane_center_y(lane)) <= tc.rail_tol_m and abs(self.yaw) <= math.radians(
-            tc.rail_tol_deg
-        )
-        if not aligned:
-            self._crash("hit the rail start badly lined up")
-            return
-        self.rail = lane
-        self.y, self.yaw, self.w = lay.lane_center_y(lane), 0.0, 0.0
-        self.drift[:] = 0.0  # the rail start is a landmark: re-localized
-        self.odo_err = 0.0
-
-    def _check_floor_collisions(self) -> None:
-        lay = self.layout
-        y0, y1 = -lay.pitch - 1.0, lay.n_lanes * lay.pitch + 1.0
-        for px, py in self._footprint():
-            if lay.in_crop(px, py):
-                self._crash("drove into a crop row")
-                return
-            if px < self._wall_x or not (y0 < py < y1):
-                self._crash("drove into the greenhouse wall")
-                return
-            if px > 0.0:
-                self._crash("drove onto the rails off the concrete")  # only on the rails past the rail start
-                return
 
 
 # ---- motor control ----------------------------------------------------------------------------

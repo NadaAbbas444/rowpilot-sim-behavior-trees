@@ -49,7 +49,7 @@ class Settings:
     """What the editor's Run panel sets: the simulator, the greenhouse and the mission."""
 
     simulator: str = "python"  # "python" or "gazebo"
-    robot: str = "drone"  # "drone" (the FireFly 2) or "trolley" (the pipe-rail trolley: Python simulator only)
+    robot: str = "drone"  # "drone" (the FireFly 2) or "trolley" (the pipe-rail trolley: no ArduPilot in Gazebo)
     lanes: int = 6
     open_ends: bool = False
     row_length: float = GreenhouseLayout.row_length
@@ -226,14 +226,16 @@ class GazeboSetup:
     runs_dir: Path = REPO / "runs"
     check_tools: bool = True  # tests run a stand-in script and skip the checks
 
-    def missing(self) -> list[str]:
-        """What is not there yet, in words; empty when the Gazebo simulation can run."""
+    def missing(self, robot: str = "drone") -> list[str]:
+        """What is not there yet, in words; empty when the Gazebo simulation can run for that robot
+        (the trolley needs no ArduPilot: plain motor control)."""
         if not self.check_tools:
             return [] if self.script.is_file() else [f"{self.script} is missing"]
-        need = {
-            "the run script": self.script,
-            "ArduCopter SITL (scripts/setup_ardupilot_sim.sh)": self.ardupilot / "build/sitl/bin/arducopter",
-            "the ardupilot_gazebo plugin (scripts/setup_ardupilot_sim.sh)": self.ardupilot_gazebo / "build",
+        need = {"the run script": self.script}
+        if robot != "trolley":
+            need["ArduCopter SITL (scripts/setup_ardupilot_sim.sh)"] = self.ardupilot / "build/sitl/bin/arducopter"
+            need["the ardupilot_gazebo plugin (scripts/setup_ardupilot_sim.sh)"] = self.ardupilot_gazebo / "build"
+        need |= {
             "the simulation's Python environment .venv-sim (scripts/setup_ardupilot_sim.sh)": REPO
             / ".venv-sim/bin/python",
             "the OpenVINS bridge build/vio/vio_bridge (scripts/setup_ardupilot_sim.sh)": REPO / "build/vio/vio_bridge",
@@ -289,12 +291,13 @@ class GazeboRun(Run):
                 "TREE": str(tree),
                 "STREAM": "1",
                 "OUT_DIR": str(self.out),
-                "VEHICLE": s.vehicle,
+                "VEHICLE": "trolley" if s.robot == "trolley" else s.vehicle,
                 "HEADLESS": "0" if s.gazebo_window else "1",
                 "GREENHOUSE_ARGS": shlex.join(s.greenhouse_args()),
             }
             cmd = [str(setup.script), str(setup.ardupilot), str(setup.ardupilot_gazebo)]
-            self._system("setup", f"starting the full simulation ({s.vehicle}); results in {self.out}")
+            what = "the pipe-rail trolley, no ArduPilot" if s.robot == "trolley" else s.vehicle
+            self._system("setup", f"starting the full simulation ({what}); results in {self.out}")
             self.proc = subprocess.Popen(
                 cmd,
                 env=env,
@@ -414,8 +417,10 @@ class RunManager:
 
     def simulators(self) -> dict:
         missing = self.gazebo.missing()
+        trolley = self.gazebo.missing("trolley")
         return {
             "python": {"available": True, "missing": []},
+            "gazebo_trolley": {"available": not trolley, "missing": trolley},
             "gazebo": {"available": not missing, "missing": missing},
         }
 
@@ -423,10 +428,8 @@ class RunManager:
         active = [r for r in self.runs.values() if not r.done]
         if settings.robot not in ("drone", "trolley"):
             raise ValueError(f"unknown robot {settings.robot!r}")
-        if settings.robot == "trolley" and settings.simulator != "python":
-            raise ValueError("the pipe-rail trolley runs in the Python simulator only, so far")
         if settings.simulator == "gazebo":
-            missing = self.gazebo.missing()
+            missing = self.gazebo.missing(settings.robot)
             if missing:
                 raise ValueError("the Gazebo simulation is not set up: missing " + "; ".join(missing))
             if any(isinstance(r, GazeboRun) for r in active):

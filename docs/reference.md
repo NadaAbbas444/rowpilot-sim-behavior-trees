@@ -93,12 +93,19 @@ Environment variables (put them before the command, e.g. `HEADLESS=1 ./scripts/r
 |---|---|---|
 | `HEADLESS=1` | 0 | no Gazebo window (faster; servers) |
 | `VEHICLE=iris` | firefly | fly the ArduPilot Iris instead of the FireFly 2 |
+| `VEHICLE=trolley` | firefly | the pipe-rail trolley: no ArduPilot (plain motor control), `rowpilot trolley-gazebo` drives it |
 | `GPU=0` | 1 | do not use the NVIDIA GPU (only if PRIME offload causes problems) |
 | `GREENHOUSE_ARGS="--lanes 4 --open-ends"` | – | another greenhouse (the world and the mission): `--lanes`, `--length`, `--path-width`, `--open-ends` |
 | `TREE=<file.json>` | – | fly this tree (a graph saved by the editor) instead of the mission |
 | `OUT_DIR=<folder>` | `runs/ardupilot-<date>-<time>` | where the results go |
 | `STREAM=1` | – | print the run as JSON lines (what the editor reads) |
 | `GZ_IP` | 127.0.0.1 | Gazebo's network interface (loopback avoids hangs with Wi-Fi + Docker) |
+
+## `python -m rowpilot trolley-gazebo`: the trolley's tree in a running Gazebo
+
+What `VEHICLE=trolley scripts/run_ardupilot_sim.sh` runs once Gazebo and OpenVINS are up. Takes the
+greenhouse options, `--out DIR`, `--max-sim-time S` (1200), `--tree graph.json` (a tree from the editor) and
+`--stream` (JSON lines for the editor; 'stop' on stdin stops the trolley).
 
 ## `python -m rowpilot ardupilot`: the tree against a running ArduPilot SITL
 

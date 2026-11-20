@@ -5,6 +5,7 @@ python -m rowpilot run --battery 45 --out runs/low-battery
 python -m rowpilot run --vo-dropout 30:1.5 --vo-dropout 120:10 --out runs/vo
 python -m rowpilot run --robot trolley --out runs/trolley   # the pipe-rail trolley instead of the drone
 python -m rowpilot tree [--robot trolley]
+python -m rowpilot trolley-gazebo  # the trolley in a running Gazebo (VEHICLE=trolley scripts/run_ardupilot_sim.sh)
 python -m rowpilot editor          # the behaviour tree editor at http://127.0.0.1:8000
 """
 
@@ -64,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="rowpilot", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name in ("run", "tree", "world", "px4", "ardupilot"):
+    for name in ("run", "tree", "world", "px4", "ardupilot", "trolley-gazebo"):
         sp = sub.add_parser(name)
         sp.add_argument("--lanes", type=int, default=6)
         sp.add_argument("--length", type=float, default=GreenhouseLayout.row_length, help="row length (m)")
@@ -93,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--out", type=Path, required=True)
     w.add_argument("--assets-dir", type=Path, help="Gazebo model folder for plant meshes; omit for plain boxes")
     w.add_argument("--vehicle", help="model URI to place at home, e.g. model://gh_iris (ArduPilot)")
+    w.add_argument("--vehicle-z", type=float, default=0.2, help="its height at home (m): 0 for the trolley")
     x = sub.choices["px4"]
     x.add_argument("--url", default="udpin://0.0.0.0:14540", help="MAVLink connection to PX4")
     x.add_argument("--world", default="greenhouse")
@@ -110,6 +112,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print every event, tick and flight-stack message as a JSON line for the editor; "
         "a line 'stop' on stdin lands the drone and ends the run",
+    )
+    tg = sub.choices["trolley-gazebo"]
+    tg.add_argument("--max-sim-time", type=float, default=1200.0)
+    tg.add_argument("--out", type=Path)
+    tg.add_argument("--tree", type=Path, help="drive this tree (a graph saved by the editor) instead of the mission")
+    tg.add_argument(
+        "--stream",
+        action="store_true",
+        help="print every event, tick and message as a JSON line for the editor; 'stop' on stdin stops it",
     )
     ed = sub.add_parser("editor", help="the behaviour tree editor (web page + API)")
     ed.add_argument("--host", default="127.0.0.1")
@@ -142,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "world":
         from .gazebo_world import spawn_pose, write_world
 
-        write_world(layout, a.template, a.out, assets_dir=a.assets_dir, vehicle=a.vehicle)
+        write_world(layout, a.template, a.out, assets_dir=a.assets_dir, vehicle=a.vehicle, vehicle_z=a.vehicle_z)
         print(f"wrote {a.out}; spawn with PX4_GZ_MODEL_POSE={spawn_pose(layout)}")
         return 0
 
@@ -152,6 +163,24 @@ def main(argv: list[str] | None = None) -> int:
         res = run_px4(layout, MissionParams(), a.url, a.world, a.model, a.max_time, a.out)
         print(json.dumps(res, indent=1))
         return 0 if res["outcome"] != "crashed" else 1
+
+    if a.cmd == "trolley-gazebo":
+        from .trolley_gazebo import run_trolley_gazebo
+
+        hooks = {}
+        if a.tree:
+            from .editor.nodes import build_from_graph
+
+            graph = json.loads(a.tree.read_text())
+            hooks["tree_factory"] = lambda ctx: build_from_graph(graph, ctx)
+        if a.stream:
+            hooks.update(_stream_hooks())
+        res = run_trolley_gazebo(layout, MissionParams(), max_sim_time_s=a.max_sim_time, out=a.out, **hooks)
+        if a.stream:
+            _stream("summary", **res)
+        else:
+            print(json.dumps(res, indent=1))
+        return 0
 
     if a.cmd == "ardupilot":
         from .airframe import VEHICLES

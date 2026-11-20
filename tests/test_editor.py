@@ -437,7 +437,7 @@ def test_each_robot_gets_its_own_nodes():
     assert {"Sequence", "Selector", "NotAborted", "BatteryAboveReserve", "Preflight", "Wait"} <= shared
 
 
-def test_trolley_runs_from_the_editor_in_the_python_simulator_only(client):
+def test_trolley_runs_from_the_editor_in_the_python_simulator(client):
     g = client.get("/api/default-tree", params={"lanes": 1, "robot": "trolley"}).json()
     assert any(n["type"] == "MountRail" for n in g["nodes"])
     lane = client.get("/api/lane", params={"lane": 2, "robot": "trolley"}).json()
@@ -448,5 +448,34 @@ def test_trolley_runs_from_the_editor_in_the_python_simulator_only(client):
     msgs = stream_all(client, run["id"])
     assert msgs[-1]["status"] == "finished" and msgs[-1]["summary"]["outcome"] == "completed"
     assert any("pipe-rail trolley" in m.get("msg", "") for m in msgs if m["kind"] == "event")
-    r = client.post("/api/runs", json={"graph": g, "settings": {**FAST, "robot": "trolley", "simulator": "gazebo"}})
-    assert r.status_code == 409 and "Python simulator only" in r.json()["detail"]
+
+
+def test_trolley_runs_in_gazebo_without_ardupilot(gz_client, tmp_path):
+    from rowpilot.editor.runs import GazeboSetup
+
+    assert gz_client.get("/api/simulators").json()["gazebo_trolley"]["available"]
+    g = gz_client.get("/api/default-tree", params={"lanes": 1, "robot": "trolley"}).json()
+    settings = {"simulator": "gazebo", "robot": "trolley", "lanes": 1}
+    run = gz_client.post("/api/runs", json={"graph": g, "settings": settings}).json()
+    msgs = stream_all(gz_client, run["id"])
+    texts = " | ".join(m["msg"] for m in msgs if m["kind"] == "event" and m["type"] == "system")
+    assert "vehicle: trolley" in texts and "the pipe-rail trolley, no ArduPilot" in texts
+    # the trolley needs Gazebo and OpenVINS, not ArduPilot
+    setup = GazeboSetup(ardupilot=tmp_path / "none", ardupilot_gazebo=tmp_path / "none2")
+    assert any("ArduCopter" in m for m in setup.missing("drone"))
+    assert not any("ArduCopter" in m or "ardupilot_gazebo" in m for m in setup.missing("trolley"))
+
+
+def test_a_tree_from_the_editor_builds_for_any_trolley_vehicle():
+    """The Gazebo trolley is not TrolleySim: the vehicle's robot attribute decides, not its class."""
+    from types import SimpleNamespace
+
+    from rowpilot.trolley import TrolleySim
+
+    lay = GreenhouseLayout(n_lanes=2)
+    graph = default_graph(lay, "trolley")
+    gazebo_like = SimpleNamespace(robot="trolley")  # what TrolleyGazebo says it is
+    build_from_graph(graph, MissionContext(gazebo_like, lay))
+    build_from_graph(graph, MissionContext(TrolleySim(lay), lay))
+    with pytest.raises(ValueError, match="for the pipe-rail trolley, not the drone"):
+        build_from_graph(graph, MissionContext(SimVehicle(lay), lay))
