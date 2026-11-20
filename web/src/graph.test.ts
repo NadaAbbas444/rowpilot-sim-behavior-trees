@@ -25,6 +25,7 @@ const spec = (type: string, category: NodeTypeSpec['category'], max: number | nu
   params,
   min_children: max === 0 ? 0 : 1,
   max_children: max,
+  robots: ['drone', 'trolley'],
 });
 
 const SPECS = new Map(

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import py_trees
@@ -68,9 +68,7 @@ class MissionContext:
     def pre_tick(self) -> None:
         """Read sensors once per tick, so every node in the tick sees the same snapshot."""
         raw = self.vehicle.state()
-        self.s = VehicleState(
-            raw.t, raw.x, raw.y + self.y_bias, raw.z, raw.yaw, raw.vo_healthy, raw.battery_pct, raw.armed, raw.landed
-        )
+        self.s = replace(raw, y=raw.y + self.y_bias)
         if raw.vo_healthy:
             self.vo_lost_since = None
         elif self.vo_lost_since is None:
@@ -82,6 +80,8 @@ class MissionContext:
         """Lane-centric localization. Inside a lane, the lane centre's map y is known, so the perceived
         offset tells us the drone's true y. Nudge the VO estimate towards it to cancel cross-track drift."""
         s, lay = self.s, self.layout
+        if s.on_rail is not None:  # on the rails the position across the lane is known mechanically
+            return
         if not (s.vo_healthy and self.lane.valid and 0.5 < s.x < lay.row_length - 0.5):
             return
         if abs(math.sin(s.yaw)) > math.sin(math.radians(20)):  # only when pointing along the rows
@@ -89,17 +89,7 @@ class MissionContext:
         lane_y = lay.lane_center_y(lay.nearest_lane(s.y))
         implied_y = lane_y - self.lane.lateral_offset * math.copysign(1.0, math.cos(s.yaw))
         self.y_bias += self.params.lane_fix_gain * (implied_y - s.y)
-        self.s = VehicleState(
-            s.t,
-            s.x,
-            s.y + self.params.lane_fix_gain * (implied_y - s.y),
-            s.z,
-            s.yaw,
-            s.vo_healthy,
-            s.battery_pct,
-            s.armed,
-            s.landed,
-        )
+        self.s = replace(s, y=s.y + self.params.lane_fix_gain * (implied_y - s.y))
 
     def vo_lost_for(self) -> float:
         return 0.0 if self.vo_lost_since is None else self.s.t - self.vo_lost_since

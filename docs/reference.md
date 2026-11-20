@@ -33,14 +33,16 @@ python -m rowpilot run --out runs/nominal
 | `--speed M_S` | 0.8 | sweep speed |
 | `--out DIR` | – | save `events.jsonl`, `trace.csv`, `summary.json`, `path.png` there |
 | `--quiet` | off | print only the summary |
+| `--robot trolley` | drone | the pipe-rail trolley instead of the drone (its own tree; `--altitude` and `--wind` do not apply) |
 
-Exit code 1 if the drone crashed, else 0.
+Exit code 1 if the robot crashed, else 0.
 
 ## `python -m rowpilot tree`: print the behaviour tree
 
 ```bash
 python -m rowpilot tree             # as text
 python -m rowpilot tree --json      # nodes and edges
+python -m rowpilot tree --robot trolley   # the pipe-rail trolley's tree
 ```
 
 Takes the greenhouse options (`--lanes`, `--length`, `--path-width`, `--open-ends`).
@@ -95,12 +97,19 @@ Environment variables (put them before the command, e.g. `HEADLESS=1 ./scripts/r
 | `ISAAC_PICAM=1` | 0 | with `SIM=isaac`: render the Pi Camera too (costs about a quarter of the render time; nothing in the flight uses it) |
 | `ISAAC_WINDOW=1` | 0 | with `SIM=isaac`: Isaac Sim's own window instead of the `isaac_view` window (needs a display Vulkan can draw on) |
 | `SIM=isaac` | gazebo | simulate in NVIDIA Isaac Sim instead of Gazebo (FireFly only; `scripts/setup_isaac_sim.sh` once; `ISAAC_PYTHON` to use another Isaac Sim Python) |
+| `VEHICLE=trolley` | firefly | the pipe-rail trolley: no ArduPilot (plain motor control), `rowpilot trolley-gazebo` drives it |
 | `GPU=0` | 1 | do not use the NVIDIA GPU (only if PRIME offload causes problems) |
 | `GREENHOUSE_ARGS="--lanes 4 --open-ends"` | – | another greenhouse (the world and the mission): `--lanes`, `--length`, `--path-width`, `--open-ends` |
 | `TREE=<file.json>` | – | fly this tree (a graph saved by the editor) instead of the mission |
 | `OUT_DIR=<folder>` | `runs/ardupilot-<date>-<time>` | where the results go |
 | `STREAM=1` | – | print the run as JSON lines (what the editor reads) |
 | `GZ_IP` | 127.0.0.1 | Gazebo's network interface (loopback avoids hangs with Wi-Fi + Docker) |
+
+## `python -m rowpilot trolley-gazebo`: the trolley's tree in a running Gazebo
+
+What `VEHICLE=trolley scripts/run_ardupilot_sim.sh` runs once Gazebo and OpenVINS are up. Takes the
+greenhouse options, `--out DIR`, `--max-sim-time S` (1200), `--tree graph.json` (a tree from the editor) and
+`--stream` (JSON lines for the editor; 'stop' on stdin stops the trolley).
 
 ## `python -m rowpilot ardupilot`: the tree against a running ArduPilot SITL
 

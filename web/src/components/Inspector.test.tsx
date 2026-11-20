@@ -10,6 +10,7 @@ const sweep: NodeTypeSpec = {
   help: 'Flies along the lane.',
   min_children: 0,
   max_children: 0,
+  robots: ['drone'],
   params: [
     { name: 'lane', kind: 'lane', default: 1, help: 'lane number', min: 1 },
     { name: 'direction', kind: 'choice', default: 'auto', help: '', choices: ['auto', '+x', '-x'] },

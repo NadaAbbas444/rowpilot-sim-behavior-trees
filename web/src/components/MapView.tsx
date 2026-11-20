@@ -1,16 +1,17 @@
 import { memo } from 'react';
 import type { PathPoint } from '../runState';
-import type { LayoutInfo, TickMsg } from '../types';
+import type { LayoutInfo, Robot, TickMsg } from '../types';
 
 interface Props {
   layout: LayoutInfo | null;
   truePath: PathPoint[];
   estPath: PathPoint[];
   last: TickMsg | null;
+  robot?: Robot;
 }
 
-/** The greenhouse from above: crop rows, the planned path, where the drone flew and where it thought it was. */
-function MapView({ layout: L, truePath, estPath, last }: Props) {
+/** The greenhouse from above: crop rows, the planned path, where the robot went and where it thought it was. */
+function MapView({ layout: L, truePath, estPath, last, robot = 'drone' }: Props) {
   if (!L) return <div className="map muted">loading the greenhouse…</div>;
   const x0 = L.home[0] - 1;
   const x1 = L.far_x + (L.closed_end ? 0.6 : -1);
@@ -51,7 +52,14 @@ function MapView({ layout: L, truePath, estPath, last }: Props) {
       <rect className="map-home" x={L.home[0] - 0.2} y={Y(L.home[1]) - 0.2} width={0.4} height={0.4} />
       {last && (
         <g transform={`translate(${last.x} ${Y(last.y)}) rotate(${(-last.yaw * 180) / Math.PI})`}>
-          <polygon className="map-drone" points="0.45,0 -0.3,0.3 -0.15,0 -0.3,-0.3" />
+          {robot === 'trolley' ? (
+            <>
+              <rect className="map-drone" x={-0.75} y={-0.3} width={1.5} height={0.6} rx={0.06} />
+              <polygon className="map-heading" points="0.75,0 0.45,0.18 0.45,-0.18" />
+            </>
+          ) : (
+            <polygon className="map-drone" points="0.45,0 -0.3,0.3 -0.15,0 -0.3,-0.3" />
+          )}
         </g>
       )}
     </svg>

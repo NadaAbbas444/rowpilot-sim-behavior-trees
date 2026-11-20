@@ -43,7 +43,8 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
   const [dropText, setDropText] = useState(settings.vo_dropouts.map(([a, b]) => `${a}:${b}`).join(', '));
   const dropOk = parseDropouts(dropText) !== null;
   const s = run.summary;
-  const gz = simulators?.gazebo;
+  const trolley = settings.robot === 'trolley';
+  const gz = trolley ? simulators?.gazebo_trolley : simulators?.gazebo;
   const isaac = simulators?.isaac;
   const gazebo = settings.simulator === 'gazebo' || settings.simulator === 'isaac'; // the full chain
   const onIsaac = settings.simulator === 'isaac';
@@ -81,6 +82,36 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
         </div>
       )}
       {run.error && <p className="issues">{run.error}</p>}
+      <h4>Robot</h4>
+      <div className="sim-choice" role="radiogroup" aria-label="Robot">
+        <label className={trolley ? '' : 'on'}>
+          <input
+            type="radio"
+            name="robot"
+            checked={!trolley}
+            disabled={running}
+            onChange={() => onChange({ ...settings, robot: 'drone' })}
+          />
+          <b>FireFly 2 drone</b>
+          <small>Flies the lanes on the centre line its depth camera sees; turns round at the dead end.</small>
+        </label>
+        <label className={trolley ? 'on' : ''}>
+          <input
+            type="radio"
+            name="robot"
+            checked={trolley}
+            disabled={running}
+            onChange={() =>
+              onChange({ ...settings, robot: 'trolley', simulator: onIsaac ? 'python' : settings.simulator })
+            }
+          />
+          <b>Pipe-rail trolley</b>
+          <small>
+            Rides the heating pipes in each lane and reverses out; drives on the concrete in the headland. Plain motor
+            control (no ArduPilot). Changing robot loads its mission tree.
+          </small>
+        </label>
+      </div>
       <h4>Simulator</h4>
       <div className="sim-choice" role="radiogroup" aria-label="Simulator">
         <label className={settings.simulator === 'python' ? 'on' : ''}>
@@ -93,8 +124,8 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
           />
           <b>Python simulator</b>
           <small>
-            Fast, any speed. The tree, lane perception and control against a modelled drone; no Gazebo,
-            ArduPilot or OpenVINS.
+            Fast, any speed. The tree, lane perception and control against a modelled {trolley ? 'trolley' : 'drone'};
+            no Gazebo, ArduPilot or OpenVINS.
           </small>
         </label>
         <label className={`${settings.simulator === 'gazebo' ? 'on' : ''} ${gz?.available === false ? 'off' : ''}`}>
@@ -105,10 +136,13 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
             disabled={running || !gz?.available}
             onChange={() => onChange({ ...settings, simulator: 'gazebo' })}
           />
-          <b>Gazebo + ArduPilot + OpenVINS</b>
+          <b>{trolley ? 'Gazebo + OpenVINS' : 'Gazebo + ArduPilot + OpenVINS'}</b>
           <small>
-            The full chain, as on the drone: the Gazebo window with the drone and its cameras, ArduCopter SITL arming
-            and flying, OpenVINS on the D435i images. Real time; about a minute to start.
+            {trolley
+              ? 'The Gazebo window with the trolley and its cameras, OpenVINS on the D435i images, the tree driving ' +
+                'the motors and a rail supervisor keeping the rails. Real time; about a minute to start.'
+              : 'The full chain, as on the drone: the Gazebo window with the drone and its cameras, ArduCopter SITL ' +
+                'arming and flying, OpenVINS on the D435i images. Real time; about a minute to start.'}
           </small>
           {gz && !gz.available && (
             <small className="warn-text">
@@ -121,7 +155,7 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
             type="radio"
             name="simulator"
             checked={onIsaac}
-            disabled={running || !isaac?.available}
+            disabled={running || !isaac?.available || trolley}
             onChange={() => onChange({ ...settings, simulator: 'isaac', vehicle: 'firefly' })}
           />
           <b>Isaac Sim + ArduPilot + OpenVINS</b>
@@ -129,6 +163,7 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
             The same full chain with NVIDIA Isaac Sim in place of Gazebo: the same greenhouse, ArduCopter SITL and
             OpenVINS. FireFly only; needs an RTX GPU. The first start compiles shaders (several minutes).
           </small>
+          {trolley && <small className="warn-text">The drone only.</small>}
           {isaac && !isaac.available && (
             <small className="warn-text">
               Not set up on this computer: missing {isaac.missing.join('; ')}. See docs/setup.md, Isaac Sim.
@@ -138,7 +173,7 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
       </div>
       {gazebo && (
         <>
-          <div className="field">
+          <div className="field" hidden={trolley}>
             <label htmlFor="set-vehicle">drone</label>
             <select
               id="set-vehicle"
@@ -159,7 +194,7 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
               checked={settings.gazebo_window}
               onChange={(e) => onChange({ ...settings, gazebo_window: e.target.checked })}
             />
-            <small>the 3D view following the drone, with live screens of its cameras; off runs headless</small>
+            <small>the 3D view following the {trolley ? 'trolley' : 'drone'}, with live screens of its cameras; off runs headless</small>
           </div>
         </>
       )}
@@ -176,11 +211,11 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
       </div>
       {GREENHOUSE.map(numField)}
       <h4>Mission</h4>
-      {MISSION.map(numField)}
+      {MISSION.filter(([k]) => !(trolley && k === 'altitude')).map(numField)}
       <h4>Python simulator only</h4>
       {gazebo && <p className="muted small">In Gazebo, the battery, wind and camera come from the simulation itself.</p>}
       <fieldset disabled={gazebo}>
-        {PYTHON_ONLY.map(numField)}
+        {PYTHON_ONLY.filter(([k]) => !(trolley && k === 'wind')).map(numField)}
         <div className="field">
           <label htmlFor="set-dropouts">visual odometry dropouts</label>
           <input
@@ -194,7 +229,11 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
               if (d) onChange({ ...settings, vo_dropouts: d });
             }}
           />
-          <small>a short one is waited out (hover); one longer than 3 s lands the drone</small>
+          <small>
+            {trolley
+              ? 'on the concrete: a short one is waited out, one longer than 3 s stops the trolley; on the rails it does not matter'
+              : 'a short one is waited out (hover); one longer than 3 s lands the drone'}
+          </small>
         </div>
       </fieldset>
     </div>

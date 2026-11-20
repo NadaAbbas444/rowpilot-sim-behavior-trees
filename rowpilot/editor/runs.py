@@ -51,6 +51,7 @@ class Settings:
     """What the editor's Run panel sets: the simulator, the greenhouse and the mission."""
 
     simulator: str = "python"  # "python", "gazebo" or "isaac"
+    robot: str = "drone"  # "drone" (the FireFly 2) or "trolley" (the pipe-rail trolley: no ArduPilot; not in Isaac Sim)
     lanes: int = 6
     open_ends: bool = False
     row_length: float = GreenhouseLayout.row_length
@@ -85,6 +86,7 @@ class Settings:
             ),
             mission=MissionParams(altitude=self.altitude, sweep_speed=self.sweep_speed),
             max_time_s=self.max_time_s,
+            robot=self.robot,
         )
 
     def greenhouse_args(self) -> list[str]:
@@ -126,11 +128,18 @@ class Run:
     def _run(self) -> None:
         s = self.settings
         wall0 = time.monotonic()
-        self._system(
-            "sim",
-            "Python simulator: the tree, lane perception and control against a modelled drone "
-            "(no Gazebo, ArduPilot or OpenVINS; choose Gazebo in Run settings for those)",
-        )
+        if s.robot == "trolley":
+            self._system(
+                "sim",
+                "Python simulator: the tree drives a modelled pipe-rail trolley (plain motor control: on the "
+                "rails in the lanes, on the concrete in the headland)",
+            )
+        else:
+            self._system(
+                "sim",
+                "Python simulator: the tree, lane perception and control against a modelled drone "
+                "(no Gazebo, ArduPilot or OpenVINS; choose Gazebo in Run settings for those)",
+            )
 
         def on_tick(row: dict) -> bool:
             self._push({"kind": "tick", **row})
@@ -220,21 +229,23 @@ class GazeboSetup:
     check_tools: bool = True  # tests run a stand-in script and skip the checks
     isaac_python: Path = Path(os.environ.get("ISAAC_PYTHON", REPO / ".venv-isaac/bin/python"))
 
-    def missing(self, simulator: str = "gazebo") -> list[str]:
-        """What is not there yet, in words; empty when the full simulation can run in that simulator
-        (Isaac Sim needs ArduPilot, OpenVINS and .venv-sim too, but not Gazebo or its plugin)."""
+    def missing(self, simulator: str = "gazebo", robot: str = "drone") -> list[str]:
+        """What is not there yet, in words; empty when the full simulation can run in that simulator for
+        that robot. Isaac Sim needs ArduPilot, OpenVINS and .venv-sim, not Gazebo or its plugin; the trolley
+        (Gazebo only) needs Gazebo and OpenVINS, not ArduPilot (plain motor control)."""
         if not self.check_tools:
             return [] if self.script.is_file() else [f"{self.script} is missing"]
-        need = {
-            "the run script": self.script,
-            "ArduCopter SITL (scripts/setup_ardupilot_sim.sh)": self.ardupilot / "build/sitl/bin/arducopter",
+        need = {"the run script": self.script}
+        if robot != "trolley":
+            need["ArduCopter SITL (scripts/setup_ardupilot_sim.sh)"] = self.ardupilot / "build/sitl/bin/arducopter"
+        need |= {
             "the simulation's Python environment .venv-sim (scripts/setup_ardupilot_sim.sh)": REPO
             / ".venv-sim/bin/python",
             "the OpenVINS bridge build/vio/vio_bridge (scripts/setup_ardupilot_sim.sh)": REPO / "build/vio/vio_bridge",
         }
         if simulator == "isaac":
             need["Isaac Sim (scripts/setup_isaac_sim.sh)"] = self.isaac_python
-        else:
+        elif robot != "trolley":
             need["the ardupilot_gazebo plugin (scripts/setup_ardupilot_sim.sh)"] = self.ardupilot_gazebo / "build"
         out = [what for what, path in need.items() if not path.exists()]
         has_gz = any((Path(d) / "gz").is_file() for d in os.environ.get("PATH", "").split(os.pathsep))
@@ -288,14 +299,15 @@ class GazeboRun(Run):
                 "TREE": str(tree),
                 "STREAM": "1",
                 "OUT_DIR": str(self.out),
-                "VEHICLE": s.vehicle,
+                "VEHICLE": "trolley" if s.robot == "trolley" else s.vehicle,
                 "SIM": "isaac" if s.simulator == "isaac" else "gazebo",
                 "HEADLESS": "0" if s.gazebo_window else "1",
                 "GREENHOUSE_ARGS": shlex.join(s.greenhouse_args()),
             }
             cmd = [str(setup.script), str(setup.ardupilot), str(setup.ardupilot_gazebo)]
             sim = "Isaac Sim" if s.simulator == "isaac" else "Gazebo"
-            self._system("setup", f"starting the full simulation in {sim} ({s.vehicle}); results in {self.out}")
+            what = "the pipe-rail trolley, no ArduPilot" if s.robot == "trolley" else s.vehicle
+            self._system("setup", f"starting the full simulation in {sim} ({what}); results in {self.out}")
             self.proc = subprocess.Popen(
                 cmd,
                 env=env,
@@ -419,15 +431,19 @@ class RunManager:
         for sim in ("gazebo", "isaac"):
             missing = self.gazebo.missing(sim)
             out[sim] = {"available": not missing, "missing": missing}
+        trolley = self.gazebo.missing("gazebo", "trolley")
+        out["gazebo_trolley"] = {"available": not trolley, "missing": trolley}
         return out
 
     def start(self, graph: dict, settings: Settings) -> Run:
         active = [r for r in self.runs.values() if not r.done]
+        if settings.robot not in ("drone", "trolley"):
+            raise ValueError(f"unknown robot {settings.robot!r}")
         if settings.simulator in ("gazebo", "isaac"):
             name = "Isaac Sim" if settings.simulator == "isaac" else "Gazebo"
-            if settings.simulator == "isaac" and settings.vehicle != "firefly":
+            if settings.simulator == "isaac" and (settings.robot != "drone" or settings.vehicle != "firefly"):
                 raise ValueError("Isaac Sim flies the FireFly only")
-            missing = self.gazebo.missing(settings.simulator)
+            missing = self.gazebo.missing(settings.simulator, settings.robot)
             if missing:
                 raise ValueError(f"the {name} simulation is not set up: missing " + "; ".join(missing))
             if any(isinstance(r, GazeboRun) for r in active):

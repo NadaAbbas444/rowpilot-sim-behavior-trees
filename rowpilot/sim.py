@@ -85,6 +85,11 @@ class SimVehicle:
     def landed(self) -> bool:
         return self.z <= 0.02
 
+    @property
+    def at_rest(self) -> bool:
+        """The run can end here: on the ground."""
+        return self.landed
+
     def arm(self) -> bool:
         if self.battery > 5:
             self.armed = True
@@ -104,15 +109,16 @@ class SimVehicle:
 
     def depth_scan(self) -> np.ndarray:
         """Cast a horizontal fan of rays and return the nearest crop-face hit of each (body frame)."""
-        if self.landed or self.z > self.layout.canopy_height:
+        if self._scan_blocked():
             return np.empty((0, 2))
         c = self.cfg
+        x0, y0 = self._camera_xy()
         a = np.radians(np.linspace(-c.depth_fov_deg / 2, c.depth_fov_deg / 2, c.depth_rays))
         th = self.yaw + a
         s, co = np.sin(th), np.cos(th)
         with np.errstate(divide="ignore", invalid="ignore"):
-            t = (self._faces[None, :] - self.y) / s[:, None]  # distance along each ray to each face line
-            xh = self.x + t * co[:, None]
+            t = (self._faces[None, :] - y0) / s[:, None]  # distance along each ray to each face line
+            xh = x0 + t * co[:, None]
         ok = (t > 0) & (xh >= 0) & (xh <= self.layout.row_length)
         tf = np.where(ok, t, np.inf)
         face = tf.argmin(axis=1)
@@ -125,18 +131,31 @@ class SimVehicle:
             t = np.where(np.isfinite(t), np.maximum(0.05, t - p / np.abs(s)), t)
         # Short end faces of each crop row, at x = 0 and x = row_length.
         with np.errstate(divide="ignore", invalid="ignore"):
-            te = (self._ends_x[None, :] - self.x) / co[:, None]
-            yh = self.y + te * s[:, None]
+            te = (self._ends_x[None, :] - x0) / co[:, None]
+            yh = y0 + te * s[:, None]
         half = self.layout.crop_width / 2
         on_end = (np.abs(yh[:, :, None] - self._centers[None, None, :]) <= half).any(axis=2)
         t = np.minimum(t, np.where((te > 0) & on_end, te, np.inf).min(axis=1))
         if self.layout.closed_end:  # the end wall closing every lane
             with np.errstate(divide="ignore", invalid="ignore"):
-                tw = (self.layout.row_length - self.x) / co
+                tw = (self.layout.row_length - x0) / co
             t = np.minimum(t, np.where(tw > 0, tw, np.inf))
+        t = np.minimum(t, self._extra_hits(x0, y0, th))
         hit = (t <= c.depth_max_range) & (self.rng.random(len(t)) >= c.depth_dropout)
         r = t[hit] + self.rng.normal(0, c.depth_noise_m, hit.sum()) * (1 + t[hit] ** 2 / 4)
         return np.column_stack([r * np.cos(a[hit]), r * np.sin(a[hit])])
+
+    def _scan_blocked(self) -> bool:
+        """No depth: on the ground (the camera sees the floor) or above the canopy."""
+        return self.landed or self.z > self.layout.canopy_height
+
+    def _camera_xy(self) -> tuple[float, float]:
+        """Where the depth camera is, in the map frame (the drone's centre: close enough)."""
+        return self.x, self.y
+
+    def _extra_hits(self, x0: float, y0: float, th: np.ndarray) -> np.ndarray:
+        """Ray distances to anything else in the greenhouse (inf: nothing). The drone's world has nothing else."""
+        return np.full(len(th), np.inf)
 
     def _foliage(self, face: np.ndarray, x: np.ndarray) -> np.ndarray:
         """How far (0..1 of foliage_m) leaves stick out at position x along a crop face."""

@@ -9,6 +9,8 @@ const GROUPS: [string, string][] = [
   ['condition', 'Conditions'],
   ['flight', 'Actions: flight'],
   ['lane', 'Actions: lanes'],
+  ['drive', 'Actions: driving'],
+  ['rail', 'Actions: rails'],
 ];
 
 export default function Palette({ specs, onAdd }: { specs: NodeTypeSpec[]; onAdd: (type: string) => void }) {

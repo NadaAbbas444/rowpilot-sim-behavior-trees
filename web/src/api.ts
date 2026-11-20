@@ -1,5 +1,5 @@
 // Talking to the Python server (rowpilot/editor/server.py).
-import type { Graph, GraphIssue, LayoutInfo, NodeTypeSpec, RunInfo, RunMessage, Settings, Simulators } from './types';
+import type { Graph, GraphIssue, LayoutInfo, NodeTypeSpec, Robot, RunInfo, RunMessage, Settings, Simulators } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -31,15 +31,16 @@ const json = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.strin
 
 export const api = {
   nodeTypes: () => call<NodeTypeSpec[]>('/api/node-types'),
-  defaultTree: (lanes: number, openEnds: boolean) =>
-    call<Graph>(`/api/default-tree?lanes=${lanes}&open_ends=${openEnds}`),
+  defaultTree: (lanes: number, openEnds: boolean, robot: Robot = 'drone') =>
+    call<Graph>(`/api/default-tree?lanes=${lanes}&open_ends=${openEnds}&robot=${robot}`),
   settingsDefaults: () => call<Settings>('/api/settings/defaults'),
-  lane: (lane: number, openEnds: boolean) =>
-    call<Graph & { root: string }>(`/api/lane?lane=${lane}&open_ends=${openEnds}`),
+  lane: (lane: number, openEnds: boolean, robot: Robot = 'drone') =>
+    call<Graph & { root: string }>(`/api/lane?lane=${lane}&open_ends=${openEnds}&robot=${robot}`),
   simulators: () => call<Simulators>('/api/simulators'),
   layout: (s: Settings) =>
     call<LayoutInfo>(
-      `/api/layout?lanes=${s.lanes}&open_ends=${s.open_ends}&row_length=${s.row_length}&path_width=${s.path_width}`,
+      `/api/layout?lanes=${s.lanes}&open_ends=${s.open_ends}&row_length=${s.row_length}&path_width=${s.path_width}` +
+        `&robot=${s.robot}`,
     ),
   validate: (graph: Graph, settings: Settings) =>
     call<{ errors: GraphIssue[] }>('/api/validate', json({ graph, settings })),

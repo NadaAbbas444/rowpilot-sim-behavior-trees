@@ -42,8 +42,9 @@ import {
   type BTNode,
 } from './graph';
 import { applyMessages, formatTime, idleRun, startRun, type RunView } from './runState';
-import type { Graph, GraphIssue, LayoutInfo, NodeTypeSpec, RunMessage, Settings, Simulators } from './types';
+import type { Graph, GraphIssue, LayoutInfo, NodeTypeSpec, Robot, RunMessage, Settings, Simulators } from './types';
 
+const ROBOT_LABEL: Record<Robot, string> = { drone: 'drone', trolley: 'trolley' };
 const nodeTypes = { bt: BTNodeView };
 const SPEEDS: [number, string][] = [
   [1, '1×'],
@@ -136,11 +137,13 @@ function Editor() {
         const sp = new Map(types.map((s) => [s.type, s]));
         setSpecList(types);
         const s = { ...defaults, ...(store.get<Partial<Settings>>('rowpilot.settings') ?? {}) };
-        if (s.simulator !== 'python' && !sims[s.simulator]?.available) s.simulator = 'python';
+        const gzOk = s.robot === 'trolley' ? sims.gazebo_trolley?.available : sims[s.simulator]?.available;
+        const trolleyInIsaac = s.robot === 'trolley' && s.simulator === 'isaac';
+        if (s.simulator !== 'python' && (!gzOk || trolleyInIsaac)) s.simulator = 'python';
         setSettings(s);
         const last = store.get<Graph>('rowpilot.graph');
         if (last?.nodes?.length) loadGraph(last, sp, store.get<string[]>('rowpilot.collapsed') ?? []);
-        else loadGraph(await api.defaultTree(s.lanes, s.open_ends), sp, 'lanes');
+        else loadGraph(await api.defaultTree(s.lanes, s.open_ends, s.robot), sp, 'lanes');
         setTreeName(store.get<string>('rowpilot.treeName') ?? 'mission');
         setReady(true);
       } catch (e) {
@@ -168,7 +171,8 @@ function Editor() {
     return () => window.clearTimeout(h);
   }, [graph, settings, treeName, collapsed, ready]);
 
-  const geomKey = settings && `${settings.lanes}|${settings.open_ends}|${settings.row_length}|${settings.path_width}`;
+  const geomKey =
+    settings && `${settings.lanes}|${settings.open_ends}|${settings.row_length}|${settings.path_width}|${settings.robot}`;
   useEffect(() => {
     if (!settings) return;
     api.layout(settings).then(setLayout).catch(() => undefined);
@@ -374,7 +378,7 @@ function Editor() {
     const slot = laneSlot(nodes, edges, specs, selected);
     if (!slot) return say('Select the sequence the lane should go into (e.g. Mission), then press + again', true);
     try {
-      const sub = await api.lane(k, settings.open_ends);
+      const sub = await api.lane(k, settings.open_ends, settings.robot);
       const r = insertSubtree(nodes, edges, sub, specs, slot.parent, slot.y);
       const ns = tidy(r.nodes, r.edges, collapsed).map((n) => ({ ...n, selected: n.id === r.root }));
       setEdges(r.edges);
@@ -400,9 +404,19 @@ function Editor() {
   // ---- files ---------------------------------------------------------------------------------------
   const loadMission = async () => {
     if (!settings) return;
-    loadGraph(await api.defaultTree(settings.lanes, settings.open_ends), specs, 'lanes');
+    loadGraph(await api.defaultTree(settings.lanes, settings.open_ends, settings.robot), specs, 'lanes');
     setTreeName('mission');
-    say(`mission tree for ${settings.lanes} ${settings.open_ends ? 'open' : 'dead-end'} lanes`);
+    const kind = settings.open_ends ? 'open' : 'dead-end';
+    say(`${ROBOT_LABEL[settings.robot]} mission tree for ${settings.lanes} ${kind} lanes`);
+  };
+  // A different robot needs its own tree (the drone's nodes cannot drive the trolley, and back).
+  const changeSettings = async (next: Settings) => {
+    const robotChanged = settings !== null && next.robot !== settings.robot;
+    setSettings(next);
+    if (!robotChanged) return;
+    loadGraph(await api.defaultTree(next.lanes, next.open_ends, next.robot), specs, 'lanes');
+    setTreeName('mission');
+    say(`switched to the ${ROBOT_LABEL[next.robot]}: loaded its mission tree for ${next.lanes} lanes`);
   };
   const newTree = () => {
     loadGraph({
@@ -539,7 +553,9 @@ function Editor() {
             onClick={() => setTab('run')}
             title="the simulator the next run uses (change it in Run settings)"
           >
-            {gazeboSim ? `${simName} + ArduPilot` : 'Python sim'}
+            {gazeboSim
+              ? `${simName}${settings?.robot === 'trolley' ? ': trolley' : ' + ArduPilot'}`
+              : `Python sim: ${ROBOT_LABEL[settings?.robot ?? 'drone']}`}
           </button>
           <label className="speed">
             speed
@@ -571,7 +587,7 @@ function Editor() {
         </div>
       </header>
 
-      <Palette specs={specList} onAdd={(t) => addNode(t)} />
+      <Palette specs={specList.filter((s) => s.robots.includes(settings?.robot ?? 'drone'))} onAdd={(t) => addNode(t)} />
 
       <main className="canvas" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
         <CanvasContext.Provider value={canvas}>
@@ -617,7 +633,13 @@ function Editor() {
       </main>
 
       <aside className="side">
-        <MapView layout={layout} truePath={run.truePath} estPath={run.estPath} last={last} />
+        <MapView
+          layout={layout}
+          truePath={run.truePath}
+          estPath={run.estPath}
+          last={last}
+          robot={settings?.robot ?? 'drone'}
+        />
         <div className="map-legend">
           <span className="lg-planned">planned</span>
           <span className="lg-true">flown</span>
@@ -663,7 +685,7 @@ function Editor() {
             />
           )}
           {tab === 'run' && settings && (
-            <RunPanel settings={settings} onChange={setSettings} run={run} simulators={simulators} />
+            <RunPanel settings={settings} onChange={changeSettings} run={run} simulators={simulators} />
           )}
         </div>
       </aside>

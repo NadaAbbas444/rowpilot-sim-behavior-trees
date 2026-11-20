@@ -18,6 +18,7 @@ export interface NodeTypeSpec {
   type: string;
   category: Category;
   group: string;
+  robots: Robot[];
   help: string;
   params: ParamSpec[];
   min_children: number;
@@ -52,8 +53,12 @@ export type Status = 'RUNNING' | 'SUCCESS' | 'FAILURE' | 'INVALID';
 
 export type Simulator = 'python' | 'gazebo' | 'isaac';
 
+/** The FireFly 2 drone, or the pipe-rail trolley (Python simulator only, so far). */
+export type Robot = 'drone' | 'trolley';
+
 export interface Settings {
   simulator: Simulator;
+  robot: Robot;
   vehicle: 'firefly' | 'iris';
   gazebo_window: boolean;
   lanes: number;
@@ -127,7 +132,13 @@ export interface LayoutInfo {
   planned_route: [number, number][];
 }
 
-export type Simulators = Record<Simulator, { available: boolean; missing: string[] }>;
+export interface SimAvailability {
+  available: boolean;
+  missing: string[];
+}
+
+/** Which simulators can run here; gazebo_trolley: Gazebo for the trolley (it needs no ArduPilot). */
+export type Simulators = Record<Simulator, SimAvailability> & { gazebo_trolley?: SimAvailability };
 
 export interface RunInfo {
   id: string;

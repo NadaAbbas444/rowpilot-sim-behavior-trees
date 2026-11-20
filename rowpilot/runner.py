@@ -18,6 +18,9 @@ from py_trees.common import Status
 from .layout import GreenhouseLayout
 from .mission import MissionContext, MissionParams, SweepLane, build_tree
 from .sim import SimConfig, SimVehicle
+from .trolley import TrolleyConfig, TrolleySim, build_trolley_tree
+
+ROBOTS = ("drone", "trolley")  # the FireFly 2 drone; the pipe-rail trolley (trolley.py)
 
 
 @dataclass
@@ -28,6 +31,8 @@ class RunConfig:
     sim_dt: float = 0.02
     tick_hz: float = 10.0
     max_time_s: float = 1800.0
+    robot: str = "drone"
+    trolley: TrolleyConfig = field(default_factory=TrolleyConfig)
 
 
 @dataclass
@@ -52,12 +57,16 @@ def run_mission(
     cfg: RunConfig | None = None,
     on_event: Callable[[dict], None] | None = None,
     *,
-    tree_factory: Callable[[MissionContext], py_trees.behaviour.Behaviour] = build_tree,
+    tree_factory: Callable[[MissionContext], py_trees.behaviour.Behaviour] | None = None,
     on_tick: Callable[[dict], bool | None] | None = None,
 ) -> RunResult:
     cfg = cfg or RunConfig()
     lay = cfg.layout
-    sim = SimVehicle(lay, cfg.sim)
+    if cfg.robot not in ROBOTS:
+        raise ValueError(f"robot must be one of {', '.join(ROBOTS)}")
+    trolley = cfg.robot == "trolley"
+    sim = TrolleySim(lay, cfg.sim, cfg.trolley) if trolley else SimVehicle(lay, cfg.sim)
+    tree_factory = tree_factory or (build_trolley_tree if trolley else build_tree)
     events: list[dict] = []
 
     ids: dict[str, str] = {}  # node name -> graph id (trees built from an editor graph)
@@ -113,8 +122,10 @@ def run_mission(
 
         if sim.crashed:
             outcome = "crashed"
+            if getattr(sim, "crash_reason", None):
+                emit({"t": round(sim.t, 2), "type": "log", "node": "sim", "msg": f"crash: {sim.crash_reason}"})
             break
-        if root.status != Status.RUNNING and sim.landed:
+        if root.status != Status.RUNNING and sim.at_rest:
             outcome = (
                 "completed"
                 if root.status == Status.SUCCESS

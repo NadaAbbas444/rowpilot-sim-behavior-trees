@@ -22,6 +22,7 @@ Contents
 14. [What the cameras see](#14-what-the-cameras-see)
 15. [Parameters you may want to change](#15-parameters-you-may-want-to-change)
 16. [Adding a node to the tree](#16-adding-a-node-to-the-tree)
+17. [The pipe-rail trolley](#17-the-pipe-rail-trolley)
 
 ---
 
@@ -558,3 +559,86 @@ Example: take a photo of every plant position.
    `feedback_message`.
 5. Add a test in `tests/test_mission.py` that runs a mission in the Python simulator and checks the
    events (see the existing tests), and run `pytest -q`.
+
+## 17. The pipe-rail trolley
+
+A second robot on the same framework (`rowpilot/trolley.py`): the pipe-rail trolley of tomato
+greenhouses, a long low chassis (1.5 x 0.6 m here) with flanged wheels that ride on the two heating
+pipes of a lane (0.55 m apart, the pipes already in the greenhouse world) and small wheels for the
+concrete in the headland. It carries the same D435i at its front. It runs in the Python simulator and
+in Gazebo (below).
+
+**Plain motor control.** The tree sends a forward speed and a turn rate (`Command.vx`, `Command.yaw_rate`;
+`vy` and `vz` are ignored), answered with a 0.25 s motor lag. No flight controller, no MAVLink.
+
+**What the simulator models** (`TrolleySim`, a `SimVehicle` underneath for the depth camera, the visual
+odometry and the battery):
+- on the concrete it drives and turns on the spot; touching a crop row or the facade is a crash;
+- it mounts when its chassis reaches the rail start lined up within 6 cm and 4 deg (the rail starts'
+  lead-in); worse is a collision with the rail ends; on the rails it moves only along the lane; past the
+  rail end it derails; reversing off the rail start puts it back on the concrete;
+- `VehicleState.on_rail` is its rail contact switch: which lane's rails it is on;
+- obstacles (`TrolleyConfig.obstacles`: position, radius, from/until) are seen by the depth camera and
+  are a crash if driven into.
+
+**Localization.** On the rails: the rails fix y and heading, wheel odometry gives x. On the concrete:
+wheel odometry (`WheelOdometry`: a scale error per run on distance and turning, noise per metre and per
+radian) from where it left the rails, or from the dock; the trips are short (2-4 m) and every rail start
+re-localizes it. Visual odometry (OpenVINS) runs as an independent check: `LocalizationOK` needs it on
+the concrete (not on the rails), so a long loss there stops the trolley (it could not tell whether its
+wheels slip). Why the wheels lead on the concrete: in Gazebo, OpenVINS on the trolley was 10-20 cm off
+after every start and stop and up to 1.3 m over a run, against 3.3 cm for the wheels. (On the drone it
+stays within 0.15 m over a 150 m flight; the trolley's step-wise velocity changes in Gazebo may be what
+upsets it: not investigated further. The run's `trace.json` has OpenVINS's position as `vio_x`, `vio_y`.)
+
+**The tree** (`build_trolley_tree`; in the editor, the default tree for the trolley):
+
+```
+Root (Sequence)
+├── SafetyGuard (Selector)
+│   ├── AllHealthy: NotAborted, BatteryAboveReserve, LocalizationOK
+│   └── Failsafe
+│       ├── PoseGlitch: VOLostBriefly -> Stop                        on the concrete: wait it out
+│       ├── EmergencyStop: MustStopNow -> StopHere                   battery critical / lost > 3 s off the rails
+│       └── ReturnAndDock: MotorsOn -> ReverseOut -> ReturnToDock -> Dock   low battery, a failed step
+└── Mission: Preflight, Lane 1 .. Lane n, ReturnToDock, Dock
+    Lane k: GoToRailStart -> MountRail -> DriveAlongRail -> ReverseOut
+```
+
+| Node | What it does |
+|---|---|
+| `GoToRailStart` | along the headland line (front 1.5 m short of the rail starts) to the lane's rails, facing along them |
+| `MountRail` | drives on, steering on visual odometry; 0.25 m before the rail start it checks 3 cm / 2.5 deg, else backs up and retries (3 tries) |
+| `DriveAlongRail` | to 0.5 m short of the rail end, slowing down near it; stops 0.45 m from anything in the way, waits, gives up after 60 s ("lane blocked") |
+| `ReverseOut` | back along the rails and off them; the lane counts as done |
+| `ReturnToDock`, `Dock` | along the headland line to the dock; stop, motors off |
+| `Stop`, `StopHere` | stand still (waiting); stop and switch the motors off |
+
+The run ends when the motors are off (`at_rest`), not when it stands still: it stands still while it
+waits for a worker to move.
+
+**Results** (default settings, `tests/test_trolley.py`): every lane, docked (within 0.3 m: the way back
+from the last lane, up to 10 m with turns, is on wheel odometry alone; a dock's guide would do the rest), ~330 s and 11 % of the
+battery for six lanes; 30 of 30 seeds complete. Waits for a worker and carries on; abandons a lane
+blocked for good and docks; docks on a low battery; on the rails a loss of visual odometry does not
+matter, on the concrete a short one is waited out and a long one stops it.
+
+**In Gazebo** (`rowpilot/trolley_gazebo.py`; `VEHICLE=trolley scripts/run_ardupilot_sim.sh`, or the editor):
+- the model (`trolley_sdf`, with the D435i rig on a post at the front, `gh_trolley_sdf`) has no gravity
+  and no collision shapes; Gazebo's VelocityControl moves it at the body velocity it is sent;
+- `TrolleyGazebo` is its motor controller and rail supervisor, at 100 Hz on Gazebo's true pose and
+  clock, with the same rules as the Python simulator (`trolley.mount`, `floor_collision`, `derailed`,
+  `off_rail_start`): on the rails it holds the trolley on the lane's line and 0.15 m up on the pipes,
+  and lets it move only along them. Flanged wheels on round pipes are not simulated;
+- no ArduPilot: the tree drives the motors directly. OpenVINS runs on the Gazebo cameras with the IMU
+  from `imu_synth`, as for the drone; at the dock the trolley nudges forwards and back a few centimetres
+  until OpenVINS initialises (its static initialisation waits for a jolt);
+- results (two lanes): both lanes done, docked within 3 cm of the dock; the estimate within 3.3 cm of the
+  truth on the concrete and 2.7 cm on the rails.
+
+**Limits.** With three times the default wheel-odometry error, the error in its own estimate exceeds the
+6 cm lead-in of the rail starts in most runs and it meets them misaligned (its line-up check passes on a
+wrong estimate). The depth camera does not help here: at the row ends it sees the ragged ends of the crop
+rows, and mixing it in made the line-up worse (measured: 2.8 cm error instead of 1.8 cm). A real trolley
+would want a fix at each rail start: a marker, or detecting the rails themselves.
+

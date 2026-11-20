@@ -16,8 +16,13 @@ A tree runs in one of three simulators (*Run settings*):
 | Settings | greenhouse, mission, battery, gusts, odometry dropouts, seed | greenhouse, mission, drone (FireFly 2 or Iris), Gazebo window on/off |
 
 The third, *Isaac Sim + ArduPilot + OpenVINS*, is the Gazebo column with NVIDIA Isaac Sim in place of
-Gazebo: the same greenhouse, settings and log, FireFly only, real time. It needs level 3b of
+Gazebo: the same greenhouse, settings and log, the drone (FireFly) only, real time. It needs level 3b of
 [setup.md](setup.md); until then it is greyed out with what is missing. Not yet flown end to end.
+
+**Robot** (*Run settings*): the FireFly 2 drone, or the **pipe-rail trolley** (Python simulator, or Gazebo + OpenVINS without ArduPilot).
+Changing robot loads that robot's mission tree, and the palette offers its nodes (the drone's flight
+and lane nodes; the trolley's driving and rail nodes; composites, decorators and the shared checks for
+both). A tree with another robot's nodes does not validate. The map draws the trolley as its chassis.
 
 ![The mission running: the active branch in amber, finished steps in green, the log and the map on the right](editor/editor-run.png)
 
