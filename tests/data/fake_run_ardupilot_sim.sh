@@ -3,7 +3,7 @@
 set -e
 echo "Starting Gazebo (log: $OUT_DIR/gazebo.log) ..."
 if [ "${FAKE_SLOW_START:-0}" = 1 ]; then sleep 600; fi
-echo "greenhouse: $GREENHOUSE_ARGS window: $HEADLESS vehicle: $VEHICLE"
+echo "greenhouse: $GREENHOUSE_ARGS window: $HEADLESS vehicle: $VEHICLE sim: ${SIM:-}"
 printf '\033[33m[init]: failed static init: no accel jerk detected\n[init]: failed static init: no accel jerk detected\n[init]: successful initialization in 0.0002 seconds\n[ZUPT]: accepted\n' > "$OUT_DIR/openvins.log"
 sleep 0.8
 ID=$(python3 -c "import json,sys; g=json.load(open(sys.argv[1])); print(next(n['id'] for n in g['nodes'] if n['name']=='Takeoff'))" "$TREE")

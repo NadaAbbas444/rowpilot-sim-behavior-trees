@@ -57,7 +57,7 @@ class Graph(BaseModel):
 
 
 class SettingsModel(BaseModel):
-    simulator: Literal["python", "gazebo"] = "python"
+    simulator: Literal["python", "gazebo", "isaac"] = "python"
     vehicle: Literal["firefly", "iris"] = "firefly"
     gazebo_window: bool = True
     lanes: int = Field(6, ge=1, le=20)

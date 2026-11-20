@@ -1,4 +1,4 @@
-"""Mission runs started from the editor, in one of two simulators:
+"""Mission runs started from the editor, in one of three simulators:
 
 - "python": rowpilot's own simulator (sim.py), in a thread. Fast (any speed), no Gazebo, ArduPilot
   or OpenVINS: the tree, perception and control against a modelled drone.
@@ -6,6 +6,8 @@
   drone and live camera screens), ArduCopter SITL, OpenVINS on the simulated D435i, and the tree
   flying ArduPilot over MAVLink. Real time. The script's `rowpilot ardupilot --stream` prints the run
   as JSON lines, which are read here; OpenVINS's own log is followed for its initialisation.
+- "isaac": the same full chain with NVIDIA Isaac Sim in place of Gazebo (the run script with SIM=isaac;
+  FireFly only). It runs as a Gazebo run does: same script, messages and results.
 
 A run records everything it produces as a list of messages:
 
@@ -48,7 +50,7 @@ REPO = Path(__file__).resolve().parents[2]
 class Settings:
     """What the editor's Run panel sets: the simulator, the greenhouse and the mission."""
 
-    simulator: str = "python"  # "python" or "gazebo"
+    simulator: str = "python"  # "python", "gazebo" or "isaac"
     lanes: int = 6
     open_ends: bool = False
     row_length: float = GreenhouseLayout.row_length
@@ -63,9 +65,9 @@ class Settings:
     # both
     altitude: float = 1.5
     sweep_speed: float = 0.8
-    # gazebo only
-    vehicle: str = "firefly"
-    gazebo_window: bool = True
+    # gazebo and isaac only
+    vehicle: str = "firefly"  # isaac: firefly only
+    gazebo_window: bool = True  # the simulator's window (Gazebo's or Isaac Sim's)
 
     def layout(self) -> GreenhouseLayout:
         return GreenhouseLayout(
@@ -216,21 +218,27 @@ class GazeboSetup:
     script: Path = REPO / "scripts" / "run_ardupilot_sim.sh"
     runs_dir: Path = REPO / "runs"
     check_tools: bool = True  # tests run a stand-in script and skip the checks
+    isaac_python: Path = Path(os.environ.get("ISAAC_PYTHON", REPO / ".venv-isaac/bin/python"))
 
-    def missing(self) -> list[str]:
-        """What is not there yet, in words; empty when the Gazebo simulation can run."""
+    def missing(self, simulator: str = "gazebo") -> list[str]:
+        """What is not there yet, in words; empty when the full simulation can run in that simulator
+        (Isaac Sim needs ArduPilot, OpenVINS and .venv-sim too, but not Gazebo or its plugin)."""
         if not self.check_tools:
             return [] if self.script.is_file() else [f"{self.script} is missing"]
         need = {
             "the run script": self.script,
             "ArduCopter SITL (scripts/setup_ardupilot_sim.sh)": self.ardupilot / "build/sitl/bin/arducopter",
-            "the ardupilot_gazebo plugin (scripts/setup_ardupilot_sim.sh)": self.ardupilot_gazebo / "build",
             "the simulation's Python environment .venv-sim (scripts/setup_ardupilot_sim.sh)": REPO
             / ".venv-sim/bin/python",
             "the OpenVINS bridge build/vio/vio_bridge (scripts/setup_ardupilot_sim.sh)": REPO / "build/vio/vio_bridge",
         }
+        if simulator == "isaac":
+            need["Isaac Sim (scripts/setup_isaac_sim.sh)"] = self.isaac_python
+        else:
+            need["the ardupilot_gazebo plugin (scripts/setup_ardupilot_sim.sh)"] = self.ardupilot_gazebo / "build"
         out = [what for what, path in need.items() if not path.exists()]
-        if not any((Path(d) / "gz").is_file() for d in os.environ.get("PATH", "").split(os.pathsep)):
+        has_gz = any((Path(d) / "gz").is_file() for d in os.environ.get("PATH", "").split(os.pathsep))
+        if simulator != "isaac" and not has_gz:
             out.append("Gazebo Harmonic (the gz command)")
         return out
 
@@ -281,11 +289,13 @@ class GazeboRun(Run):
                 "STREAM": "1",
                 "OUT_DIR": str(self.out),
                 "VEHICLE": s.vehicle,
+                "SIM": "isaac" if s.simulator == "isaac" else "gazebo",
                 "HEADLESS": "0" if s.gazebo_window else "1",
                 "GREENHOUSE_ARGS": shlex.join(s.greenhouse_args()),
             }
             cmd = [str(setup.script), str(setup.ardupilot), str(setup.ardupilot_gazebo)]
-            self._system("setup", f"starting the full simulation ({s.vehicle}); results in {self.out}")
+            sim = "Isaac Sim" if s.simulator == "isaac" else "Gazebo"
+            self._system("setup", f"starting the full simulation in {sim} ({s.vehicle}); results in {self.out}")
             self.proc = subprocess.Popen(
                 cmd,
                 env=env,
@@ -396,7 +406,8 @@ class GazeboRun(Run):
 
 
 class RunManager:
-    """Keeps the latest runs; at most `max_active` Python runs and one Gazebo run at once."""
+    """Keeps the latest runs; at most `max_active` Python runs and one full-chain run (Gazebo or Isaac
+    Sim: they share ArduPilot's ports) at once."""
 
     def __init__(self, keep: int = 20, max_active: int = 4, gazebo: GazeboSetup | None = None):
         self.keep, self.max_active = keep, max_active
@@ -404,20 +415,23 @@ class RunManager:
         self.runs: dict[str, Run] = {}
 
     def simulators(self) -> dict:
-        missing = self.gazebo.missing()
-        return {
-            "python": {"available": True, "missing": []},
-            "gazebo": {"available": not missing, "missing": missing},
-        }
+        out = {"python": {"available": True, "missing": []}}
+        for sim in ("gazebo", "isaac"):
+            missing = self.gazebo.missing(sim)
+            out[sim] = {"available": not missing, "missing": missing}
+        return out
 
     def start(self, graph: dict, settings: Settings) -> Run:
         active = [r for r in self.runs.values() if not r.done]
-        if settings.simulator == "gazebo":
-            missing = self.gazebo.missing()
+        if settings.simulator in ("gazebo", "isaac"):
+            name = "Isaac Sim" if settings.simulator == "isaac" else "Gazebo"
+            if settings.simulator == "isaac" and settings.vehicle != "firefly":
+                raise ValueError("Isaac Sim flies the FireFly only")
+            missing = self.gazebo.missing(settings.simulator)
             if missing:
-                raise ValueError("the Gazebo simulation is not set up: missing " + "; ".join(missing))
+                raise ValueError(f"the {name} simulation is not set up: missing " + "; ".join(missing))
             if any(isinstance(r, GazeboRun) for r in active):
-                raise RuntimeError("a Gazebo run is already going (one at a time); stop it first")
+                raise RuntimeError("a Gazebo or Isaac Sim run is already going (one at a time); stop it first")
             run: Run = GazeboRun(graph, settings, self.gazebo)
         else:
             if len(active) >= self.max_active:

@@ -50,7 +50,7 @@ export interface GraphIssue {
 
 export type Status = 'RUNNING' | 'SUCCESS' | 'FAILURE' | 'INVALID';
 
-export type Simulator = 'python' | 'gazebo';
+export type Simulator = 'python' | 'gazebo' | 'isaac';
 
 export interface Settings {
   simulator: Simulator;

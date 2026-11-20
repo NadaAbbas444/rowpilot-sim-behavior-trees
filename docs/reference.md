@@ -91,6 +91,10 @@ Environment variables (put them before the command, e.g. `HEADLESS=1 ./scripts/r
 |---|---|---|
 | `HEADLESS=1` | 0 | no Gazebo window (faster; servers) |
 | `VEHICLE=iris` | firefly | fly the ArduPilot Iris instead of the FireFly 2 |
+| `ISAAC_LOOK=gazebo` | isaac | with `SIM=isaac`: the Gazebo world's plain look instead of Isaac Sim's materials, sky and detailed plants (faster to render) |
+| `ISAAC_PICAM=1` | 0 | with `SIM=isaac`: render the Pi Camera too (costs about a quarter of the render time; nothing in the flight uses it) |
+| `ISAAC_WINDOW=1` | 0 | with `SIM=isaac`: Isaac Sim's own window instead of the `isaac_view` window (needs a display Vulkan can draw on) |
+| `SIM=isaac` | gazebo | simulate in NVIDIA Isaac Sim instead of Gazebo (FireFly only; `scripts/setup_isaac_sim.sh` once; `ISAAC_PYTHON` to use another Isaac Sim Python) |
 | `GPU=0` | 1 | do not use the NVIDIA GPU (only if PRIME offload causes problems) |
 | `GREENHOUSE_ARGS="--lanes 4 --open-ends"` | – | another greenhouse (the world and the mission): `--lanes`, `--length`, `--path-width`, `--open-ends` |
 | `TREE=<file.json>` | – | fly this tree (a graph saved by the editor) instead of the mission |

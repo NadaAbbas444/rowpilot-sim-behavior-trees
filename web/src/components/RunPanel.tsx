@@ -44,7 +44,9 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
   const dropOk = parseDropouts(dropText) !== null;
   const s = run.summary;
   const gz = simulators?.gazebo;
-  const gazebo = settings.simulator === 'gazebo';
+  const isaac = simulators?.isaac;
+  const gazebo = settings.simulator === 'gazebo' || settings.simulator === 'isaac'; // the full chain
+  const onIsaac = settings.simulator === 'isaac';
   const running = run.phase === 'running';
   const numField = ([key, label, help, step]: Field) => (
     <div className="field" key={key}>
@@ -114,6 +116,25 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
             </small>
           )}
         </label>
+        <label className={`${onIsaac ? 'on' : ''} ${isaac?.available === false ? 'off' : ''}`}>
+          <input
+            type="radio"
+            name="simulator"
+            checked={onIsaac}
+            disabled={running || !isaac?.available}
+            onChange={() => onChange({ ...settings, simulator: 'isaac', vehicle: 'firefly' })}
+          />
+          <b>Isaac Sim + ArduPilot + OpenVINS</b>
+          <small>
+            The same full chain with NVIDIA Isaac Sim in place of Gazebo: the same greenhouse, ArduCopter SITL and
+            OpenVINS. FireFly only; needs an RTX GPU. The first start compiles shaders (several minutes).
+          </small>
+          {isaac && !isaac.available && (
+            <small className="warn-text">
+              Not set up on this computer: missing {isaac.missing.join('; ')}. See docs/setup.md, Isaac Sim.
+            </small>
+          )}
+        </label>
       </div>
       {gazebo && (
         <>
@@ -122,6 +143,8 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
             <select
               id="set-vehicle"
               value={settings.vehicle}
+              disabled={onIsaac}
+              title={onIsaac ? 'Isaac Sim flies the FireFly only' : undefined}
               onChange={(e) => onChange({ ...settings, vehicle: e.target.value as Settings['vehicle'] })}
             >
               <option value="firefly">FireFly 2 (the real drone)</option>
@@ -129,7 +152,7 @@ export default function RunPanel({ settings, onChange, run, simulators }: Props)
             </select>
           </div>
           <div className="field field-inline">
-            <label htmlFor="set-window">Gazebo window</label>
+            <label htmlFor="set-window">{onIsaac ? 'Isaac Sim window' : 'Gazebo window'}</label>
             <input
               id="set-window"
               type="checkbox"

@@ -171,6 +171,40 @@ Things learned getting it to fly, all handled in the scripts and code:
 - **FireFly rate gains** (`ardupilot/firefly.parm`). On the long, light frame pitch and yaw respond about twice as strongly as on the Iris: with ArduCopter's default gains yaw oscillated at ±25°/s, the visual odometry drifted 3 m sideways in one lane, and the drone fell in its first turn. Pitch and yaw gains are halved. Roll, the lightest axis, limit-cycled at 20 Hz with the default D gain; 0.0015 removes it (roll-rate noise 107 → 9°/s). Tune these again on the real drone.
 - **The flight controller's response.** ArduCopter follows GUIDED velocity targets with ~0.5 s dead time and a 0.3 s lag (its jerk and acceleration limits). The Python simulator now models that, and the lane and waypoint controllers are tuned for it: the old gains made the drone swing across the lane. With this delay, the drone holds the lanes in gusts up to 0.5 m/s rms (20/20 runs); at 0.8 m/s most runs touch the crop.
 
+### Isaac Sim instead of Gazebo
+
+The same mission can run in NVIDIA Isaac Sim, from the terminal or the editor (*Isaac Sim + ArduPilot +
+OpenVINS*). ArduCopter SITL, OpenVINS and the behaviour tree are unchanged. Isaac Sim builds the same
+greenhouse from the generated world and flies the FireFly through ArduPilot's JSON lock-step interface.
+A small relay republishes its cameras and IMU on the Gazebo topics.
+
+```bash
+./scripts/setup_isaac_sim.sh                                              # once, after setup_ardupilot_sim.sh: Isaac Sim 4.5 in .venv-isaac
+SIM=isaac ./scripts/run_ardupilot_sim.sh ~/ardupilot ~/ardupilot_gazebo   # HEADLESS=1 works too
+```
+
+| Piece | File |
+|---|---|
+| The Isaac Sim app: greenhouse in USD, FireFly rigid body and rotors, cameras, lock-step loop | `isaac/greenhouse_isaac.py` |
+| The generated Gazebo world read back as shapes, plant meshes, camera conventions | `rowpilot/isaac_scene.py` |
+| ArduPilot JSON protocol, rotor forces, D435i IMU from the physics, stream framing | `rowpilot/isaac_link.py` |
+| Relay onto gz-transport (Isaac Sim's Python cannot load the gz bindings) | `rowpilot/isaac_relay.py` |
+| The window: the view following the drone and its cameras | `rowpilot/isaac_view.py` |
+| Isaac Sim's look: MDL materials per part; detailed plants and generated textures | `rowpilot/isaac_scene.py:look_for`, `rowpilot/isaac_plants.py` |
+
+In Isaac Sim the greenhouse has the same layout but Isaac Sim's look: NVIDIA MDL materials (glass facades,
+steel posts and pipe rails, ground cover with a normal map, glossy fruit), an HDRI sky from NVIDIA's sky
+library seen through the glass, and more detailed tomato plants on the same skeleton as Gazebo's (curved
+leaflet cards carrying a generated, serrated tomato-leaflet texture). `ISAAC_LOOK=gazebo` gives the plain
+Gazebo look instead.
+
+![The greenhouse in Isaac Sim: the FireFly 2 hovering in a lane](docs/isaac-greenhouse.jpg)
+
+Isaac Sim renders headless; a window (`rowpilot/isaac_view.py`) shows a level camera following the drone and its cameras live, as the Gazebo window does. `ISAAC_WINDOW=1` opens Isaac Sim's own window instead, where the desktop allows it: on a desktop running on software rendering (`glxinfo -B` says llvmpipe), Isaac Sim cannot create its Vulkan window and crashes.
+
+Needs an NVIDIA RTX GPU (driver ≥ 535), ~30 GB of free disk and Python 3.10. Only the FireFly.
+**Status:** the protocol, rotor, IMU, scene and relay code is tested (`tests/test_isaac_*.py`, and the relay against real gz-transport). The full Isaac Sim run has not been flown yet. Details: [docs/how-it-works.md](docs/how-it-works.md#isaac-sim-in-place-of-gazebo-simisaac).
+
 ## PX4 SITL + Gazebo
 
 The older PX4 path (kept, not the priority: the real drone runs ArduPilot). The same behaviour tree flies the PX4 flight stack in Gazebo, through a `Vehicle` implementation over MAVSDK. No GPS and no magnetometer: PX4's EKF2 fuses only the vision odometry, as on the real drone.

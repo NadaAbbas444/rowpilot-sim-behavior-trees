@@ -5,7 +5,7 @@ live. Running nodes light up, each node shows its own log, and a map shows where
 The page is React + React Flow; the server is FastAPI and runs the same Python tree code as
 `python -m rowpilot run` and the ArduPilot simulation.
 
-A tree runs in one of two simulators (*Run settings*):
+A tree runs in one of three simulators (*Run settings*):
 
 | | Python simulator | Gazebo + ArduPilot + OpenVINS |
 |---|---|---|
@@ -14,6 +14,10 @@ A tree runs in one of two simulators (*Run settings*):
 | Log | the tree's nodes | the tree's nodes **and the flight stack**: ArduPilot's own messages (pre-arm checks, EKF3, arming), what rowpilot asks over MAVLink (GUIDED, arm, take-off, LAND), EKF3 getting its position from the visual odometry, OpenVINS initialising, and the start-up of each part |
 | Needs | Python only | the level 2 setup ([setup.md](setup.md)); the editor shows what is missing |
 | Settings | greenhouse, mission, battery, gusts, odometry dropouts, seed | greenhouse, mission, drone (FireFly 2 or Iris), Gazebo window on/off |
+
+The third, *Isaac Sim + ArduPilot + OpenVINS*, is the Gazebo column with NVIDIA Isaac Sim in place of
+Gazebo: the same greenhouse, settings and log, FireFly only, real time. It needs level 3b of
+[setup.md](setup.md); until then it is greyed out with what is missing. Not yet flown end to end.
 
 ![The mission running: the active branch in amber, finished steps in green, the log and the map on the right](editor/editor-run.png)
 

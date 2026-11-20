@@ -8,6 +8,7 @@ bottom up. Leaves are double-sided quads (cameras see them from both sides) with
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
@@ -144,16 +145,19 @@ def _leaflet(origin, direction, side_dir, length: float, width: float) -> np.nda
     )
 
 
-def tomato_plant_mesh(seed: int, height: float = 2.6) -> _Mesh:
+def tomato_plant_parts(seed: int, height: float = 2.6) -> list[tuple]:
+    """Where a plant's parts go, in order: ("stem", p0, p1, radius, sides), ("leaflet", origin, direction,
+    side_dir, length, width, material), ("fruit", centre, radius, material). tomato_plant_mesh turns them
+    into the Gazebo mesh; Isaac Sim builds more detailed geometry on the same parts (isaac_plants.py)."""
     rng = np.random.default_rng(seed)
-    mesh = _Mesh()
+    parts: list[tuple] = []
     lean = rng.normal(0, 0.03, 2)
     top = np.array([lean[0], lean[1], height])
 
     def stem_at(z: float) -> np.ndarray:
         return np.array([lean[0] * z / height, lean[1] * z / height, z])
 
-    mesh.add(*_cylinder((0, 0, 0), top, 0.012), "stem")
+    parts.append(("stem", np.zeros(3), top, 0.012, 6))
     z, phi = 0.55 + rng.uniform(0, 0.1), rng.uniform(0, 2 * math.pi)  # bottom is de-leafed
     node = 0
     while z < height - 0.08:
@@ -169,8 +173,8 @@ def tomato_plant_mesh(seed: int, height: float = 2.6) -> _Mesh:
         droop = rise - rng.uniform(0.5, 0.9)
         d2 = out * math.cos(droop) + np.array([0, 0, math.sin(droop)])
         p2 = p1 + 0.5 * length * d2
-        mesh.add(*_cylinder(base, p1, 0.004, 4), "stem")
-        mesh.add(*_cylinder(p1, p2, 0.003, 4), "stem")
+        parts.append(("stem", base, p1, 0.004, 4))
+        parts.append(("stem", p1, p2, 0.003, 4))
         side = np.cross(out, [0, 0, 1.0])
         mat = ["leaf_dark", "leaf_mid", "leaf_light"][min(2, int(rng.integers(0, 3)) if z < height - 0.5 else 2)]
         for k, t in enumerate((0.15, 0.32, 0.49, 0.66, 0.83)):  # leaflet pairs along the rachis
@@ -181,11 +185,11 @@ def tomato_plant_mesh(seed: int, height: float = 2.6) -> _Mesh:
                 w = np.cross(d, [0, 0, 1.0])
                 w = w / (np.linalg.norm(w) + 1e-9)
                 ll = rng.uniform(0.13, 0.19) * young * (1.0 - 0.06 * k)
-                mesh.add(_leaflet(p, d, w, ll, ll * 0.62), [(0, 1, 2), (0, 2, 3)], mat, double_sided=True)
+                parts.append(("leaflet", p, d, w, ll, ll * 0.62, mat))
         tip_w = np.cross(d2, [0, 0, 1.0])
         tip_w /= np.linalg.norm(tip_w) + 1e-9
         tl = rng.uniform(0.12, 0.17) * young
-        mesh.add(_leaflet(p2, d2, tip_w, tl, tl * 0.55), [(0, 1, 2), (0, 2, 3)], mat, double_sided=True)
+        parts.append(("leaflet", p2, d2, tip_w, tl, tl * 0.55, mat))
         # fruit truss on every third node, opposite-ish to the leaf, in the lower part of the plant
         if node % 3 == 0 and z < height - 0.7:
             colour = "fruit_red" if z < 1.25 else ("fruit_orange" if z < 1.6 else "fruit_green")
@@ -194,8 +198,23 @@ def tomato_plant_mesh(seed: int, height: float = 2.6) -> _Mesh:
             t_dir /= np.linalg.norm(t_dir)
             for i in range(int(rng.integers(4, 7))):
                 c = base + t_dir * (0.06 + 0.035 * i) + np.array([0, 0, -0.05 - 0.02 * i + rng.normal(0, 0.01)])
-                mesh.add(*_sphere(c, rng.uniform(0.022, 0.032)), colour)
+                parts.append(("fruit", c, rng.uniform(0.022, 0.032), colour))
         z += rng.uniform(0.17, 0.22)
+    return parts
+
+
+def tomato_plant_mesh(seed: int, height: float = 2.6) -> _Mesh:
+    mesh = _Mesh()
+    for part in tomato_plant_parts(seed, height):
+        if part[0] == "stem":
+            _, p0, p1, r, sides = part
+            mesh.add(*_cylinder(p0, p1, r, sides), "stem")
+        elif part[0] == "leaflet":
+            _, p, d, w, length, width, mat = part
+            mesh.add(_leaflet(p, d, w, length, width), [(0, 1, 2), (0, 2, 3)], mat, double_sided=True)
+        else:
+            _, c, r, colour = part
+            mesh.add(*_sphere(c, r), colour)
     return mesh
 
 
@@ -239,6 +258,9 @@ def write_plant_model(model_dir: Path, variants: int = 8, height: float = 2.6, s
         names.append(f"tomato_{i}.dae")
         (meshes / names[-1]).write_text(tomato_plant_mesh(seed * 100 + i, height).dae())
     floor_texture(meshes / "floor.png", seed=seed)
+    # Which plant each mesh is, so Isaac Sim can rebuild it in detail (isaac_plants.py).
+    index = {n: {"seed": seed * 100 + i, "height": height} for i, n in enumerate(names)}
+    (meshes / "plants.json").write_text(json.dumps(index, indent=1))
     (model_dir / "model.config").write_text(
         '<?xml version="1.0"?>\n<model>\n  <name>greenhouse_assets</name>\n  <version>1.0</version>\n'
         '  <sdf version="1.9">model.sdf</sdf>\n  <description>Procedural tomato plants and floor texture for the'

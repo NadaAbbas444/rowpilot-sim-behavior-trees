@@ -136,7 +136,7 @@ function Editor() {
         const sp = new Map(types.map((s) => [s.type, s]));
         setSpecList(types);
         const s = { ...defaults, ...(store.get<Partial<Settings>>('rowpilot.settings') ?? {}) };
-        if (s.simulator === 'gazebo' && !sims.gazebo.available) s.simulator = 'python';
+        if (s.simulator !== 'python' && !sims[s.simulator]?.available) s.simulator = 'python';
         setSettings(s);
         const last = store.get<Graph>('rowpilot.graph');
         if (last?.nodes?.length) loadGraph(last, sp, store.get<string[]>('rowpilot.collapsed') ?? []);
@@ -199,7 +199,8 @@ function Editor() {
   useEffect(() => () => unfollow.current?.(), []);
 
   const running = run.phase === 'running';
-  const gazeboSim = settings?.simulator === 'gazebo';
+  const gazeboSim = settings?.simulator === 'gazebo' || settings?.simulator === 'isaac'; // the full chain, real time
+  const simName = settings?.simulator === 'isaac' ? 'Isaac Sim' : 'Gazebo';
 
   const startTheRun = async () => {
     if (!settings) return;
@@ -538,7 +539,7 @@ function Editor() {
             onClick={() => setTab('run')}
             title="the simulator the next run uses (change it in Run settings)"
           >
-            {gazeboSim ? 'Gazebo + ArduPilot' : 'Python sim'}
+            {gazeboSim ? `${simName} + ArduPilot` : 'Python sim'}
           </button>
           <label className="speed">
             speed
@@ -546,7 +547,7 @@ function Editor() {
               value={gazeboSim ? 1 : (settings?.speed ?? 20)}
               onChange={(e) => settings && setSettings({ ...settings, speed: Number(e.target.value) })}
               disabled={running || gazeboSim}
-              title={gazeboSim ? 'Gazebo runs in real time' : 'simulated seconds per real second'}
+              title={gazeboSim ? `${simName} runs in real time` : 'simulated seconds per real second'}
             >
               {SPEEDS.map(([v, l]) => (
                 <option key={v} value={v}>

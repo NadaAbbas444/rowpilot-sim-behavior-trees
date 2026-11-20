@@ -8,6 +8,7 @@ from the terminal or from the behaviour tree editor. Three levels; each one adds
 | **1. Python simulator** | the behaviour tree, lane perception and control against a fast built-in simulator; the tests | 5 minutes | Python 3.10+, any OS |
 | **2. The editor** | the behaviour tree editor in the browser: draw the tree, run it, watch every node | +5 minutes | Node.js 18+ |
 | **3. Gazebo + ArduPilot + OpenVINS** | the real drone's software chain: ArduCopter SITL, OpenVINS on simulated D435i images, the FireFly in Gazebo with live camera screens; from the terminal or the editor | +about 1 hour | Ubuntu 22.04, an NVIDIA GPU recommended |
+| **3b. Isaac Sim** (optional) | the same chain with NVIDIA Isaac Sim in place of Gazebo | +about 1 hour (a large download) | level 3, an NVIDIA RTX GPU, ~30 GB of disk |
 
 Every command and option: [reference.md](reference.md). How it all works: [how-it-works.md](how-it-works.md).
 
@@ -173,6 +174,22 @@ error (`lane_rms_error_m`) under about 0.15 m. Three 6-lane runs on the tested l
 fresh clone set up with this guide): 37–117 mm RMS, worst 0.36–0.52 m, 371–393 s. In `path.png` the
 green line is the planned path, blue where the drone really flew, dashed orange where it believed it
 was.
+
+### Isaac Sim instead of Gazebo (level 3b, optional)
+
+With level 3 set up, add Isaac Sim 4.5 (into `.venv-isaac`; it checks the GPU driver, disk space and
+Python 3.10 first, and its first start asks you to accept NVIDIA's licence in the terminal):
+
+```bash
+./scripts/setup_isaac_sim.sh
+```
+
+Then fly from the terminal with `SIM=isaac ./scripts/run_ardupilot_sim.sh ~/ardupilot ~/ardupilot_gazebo`,
+or choose *Isaac Sim + ArduPilot + OpenVINS* in the editor's Run settings (it should print
+**"Isaac Sim runs: ready"** at start). The first start compiles shaders, which takes several minutes.
+The window that opens is `isaac_view` (Isaac Sim itself renders headless). FireFly only. With 8 GB of GPU memory, run headless (`HEADLESS=1`, or untick the window in the editor).
+**Status:** the protocol, rotor, IMU, scene and relay code is tested (`tests/test_isaac_*.py`, and the relay against real gz-transport). The full Isaac Sim run has not been flown yet. The run folder has `isaac.log` (it prints the real-time factor every 10 simulated seconds)
+and `isaac_relay.log` in place of `gazebo.log` and `imu_synth.log`.
 
 ---
 

@@ -412,7 +412,7 @@ Two ArduCopter behaviours the vehicle code handles: a velocity target during NAV
 climb, so velocity targets are held back until the drone is airborne; and on the ground velocity
 targets do not make it climb (it disarms instead).
 
-## 12. The two simulators
+## 12. The simulators
 
 | | Python simulator (`rowpilot/sim.py`) | ArduPilot SITL + Gazebo |
 |---|---|---|
@@ -427,6 +427,51 @@ targets do not make it climb (it disarms instead).
 The behaviour tree, perception and control code are the same in both: they only see the `Vehicle`
 interface (`state`, `arm`, `send`, `land`, `depth_scan`; `rowpilot/vehicle.py`).
 
+### Isaac Sim in place of Gazebo (`SIM=isaac`)
+
+`SIM=isaac ./scripts/run_ardupilot_sim.sh`, or *Isaac Sim + ArduPilot + OpenVINS* in the editor, swaps
+Gazebo for NVIDIA Isaac Sim 4.5 and keeps everything else: ArduCopter SITL, OpenVINS (`vio_bridge`),
+the behaviour tree, the topics and the run folder.
+
+```mermaid
+flowchart LR
+    AP["ArduCopter SITL<br/>--model JSON"] -- "servo PWM, UDP 9002" --> IS["Isaac Sim<br/>isaac/greenhouse_isaac.py"]
+    IS -- "state (JSON), lock-step 1 kHz" --> AP
+    IS -- "images, IMU, pose, clock<br/>TCP 9100" --> RL["rowpilot.isaac_relay<br/>(.venv-sim)"]
+    RL -- "gz-transport, same topics as Gazebo" --> VIO["vio_bridge"]
+    RL --> BT["rowpilot ardupilot"]
+```
+
+- **Same greenhouse, Isaac Sim's look.** The layout is Gazebo's; the looks are Isaac Sim's. Each part gets
+  an NVIDIA MDL material for what it is made of (`isaac_scene.look_for`: OmniGlass facades, steel posts
+  and pipes, ground cover with a normal map), NVIDIA's HDRI sky lights the scene through the glass, and the
+  plants are rebuilt in detail on the same skeleton (`greenhouse_assets.tomato_plant_parts`, shared with
+  Gazebo's meshes): smooth stems, curved leaflet cards with a generated serrated leaflet texture cut out
+  by alpha, smooth fruit (`isaac_plants.py`). Render cost per frame, all sensor cameras plus the follow
+  view (RTX 4070 Laptop): about 80 ms, 67 ms headless; 49 ms with `ISAAC_LOOK=gazebo`. The Pi Camera
+  renders only with `ISAAC_PICAM=1`, and `--quality high` (global illumination) is for stills.
+  `isaac/greenhouse_isaac.py --preview <folder>` renders stills of the scene without ArduPilot.
+- **Same geometry.** Isaac Sim does not load SDF, so `rowpilot/isaac_scene.py` reads the world
+  `ardupilot/install.sh` generated (shapes, colours, floor texture, plant meshes; `GREENHOUSE_ARGS`
+  included) and the Isaac app builds it in USD. The plants are one point instancer.
+- **Same protocol to ArduPilot.** ArduPilot's JSON SITL interface, which ardupilot_gazebo's plugin also
+  uses, so `gps_denied.parm` and `firefly.parm` carry over. One physics step per servo packet.
+- **The FireFly as one rigid body.** Mass, inertia and the collision box come from `airframe.py`.
+  The four rotors are forces: speed from the PWM with a 10 ms lag, thrust proportional to speed²
+  (7 N each at full speed), and the yaw reaction of the Gazebo blades
+  (`rowpilot/isaac_link.py:RotorThrust`). The props do not spin visually.
+- **The IMU comes from the physics.** The D435i accelerometer is computed as `imu_synth` computes it
+  for Gazebo, and the gyro comes from the body's angular velocity, with the same BMI055 noise. The
+  Isaac app publishes `/<model>/d435i_imu_kin` itself, so `imu_synth` does not run.
+- **The window.** Isaac Sim renders headless; a window (`rowpilot/isaac_view.py`) shows a level camera following the drone and its cameras live, as the Gazebo window does. `ISAAC_WINDOW=1` opens Isaac Sim's own window instead, where the desktop allows it: on a desktop running on software rendering (`glxinfo -B` says llvmpipe), Isaac Sim cannot create its Vulkan window and crashes.
+- **The relay** exists because Isaac Sim ships its own Python, which cannot load the system's
+  gz-transport bindings. It republishes the stream on `/gh_firefly/{infra1,infra2,depth,picam}`,
+  `/gh_firefly/d435i_imu_kin`, `/world/greenhouse/pose/info` and `/world/greenhouse/clock`.
+
+Things to check on a first run: the image stamps against the IMU (rendering is set to synchronous so
+that an image belongs to the step it is stamped with), and the real-time factor that `isaac.log`
+prints every 10 simulated seconds.
+
 ## 13. What each run saves, and where
 
 | Run | Folder | Files |
@@ -435,6 +480,7 @@ interface (`state`, `arm`, `send`, `land`, `depth_scan`; `rowpilot/vehicle.py`).
 | Editor, Python simulator | kept in the editor while it runs (the Log tab, the map) | not saved to disk |
 | Editor, Gazebo | `runs/editor-<date>-<time>-<id>/` | as a terminal Gazebo run, plus `tree.json` (the tree that flew) |
 | ArduPilot + Gazebo | `runs/ardupilot-<date>-<time>/` | `path.png`, `summary.json`, `events.jsonl`, `trace.json`, `logs/*.BIN` (ArduPilot dataflash log), `gazebo.log`, `arducopter.log`, `openvins.log`, `imu_synth.log` |
+| ArduPilot + Isaac Sim | `runs/ardupilot-<date>-<time>/` (editor: `runs/editor-...`) | as above, with `isaac.log` and `isaac_relay.log` in place of `gazebo.log` and `imu_synth.log` |
 | Camera views | `docs/views/` (or `--out`) | from `scripts/camera_views.py` |
 
 `runs/` is not committed to git. The pictures in the README are copies kept in `docs/`.

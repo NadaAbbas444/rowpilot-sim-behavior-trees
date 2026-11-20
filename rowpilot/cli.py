@@ -125,8 +125,9 @@ def main(argv: list[str] | None = None) -> int:
         if not (WEB_DIST / "index.html").is_file():
             print(f"web page not built ({WEB_DIST}): cd web && npm ci && npm run build; API only", file=sys.stderr)
         gazebo = GazeboSetup(ardupilot=a.ardupilot, ardupilot_gazebo=a.ardupilot_gazebo)
-        missing = gazebo.missing()
-        print("Gazebo runs: " + ("ready" if not missing else "not available, missing " + "; ".join(missing)))
+        for sim, name in (("gazebo", "Gazebo"), ("isaac", "Isaac Sim")):
+            missing = gazebo.missing(sim)
+            print(f"{name} runs: " + ("ready" if not missing else "not available, missing " + "; ".join(missing)))
         print(f"rowpilot editor on http://{a.host}:{a.port}")
         uvicorn.run(create_app(a.trees, gazebo=gazebo), host=a.host, port=a.port, log_level="warning")
         return 0

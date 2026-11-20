@@ -359,6 +359,44 @@ def test_gazebo_needs_its_setup(tmp_path):
         assert r.status_code == 409 and "not set up" in r.json()["detail"]
 
 
+def test_isaac_run_uses_the_same_script_with_sim_isaac(gz_client):
+    sims = gz_client.get("/api/simulators").json()
+    assert sims["isaac"]["available"]
+    g = gz_client.get("/api/default-tree", params={"lanes": 1}).json()
+    run = gz_client.post("/api/runs", json={"graph": g, "settings": {"simulator": "isaac", "lanes": 1}}).json()
+    assert run["simulator"] == "isaac"
+    msgs = stream_all(gz_client, run["id"])
+    texts = " | ".join(m["msg"] for m in msgs if m["kind"] == "event" and m["type"] == "system")
+    assert "full simulation in Isaac Sim (firefly)" in texts and "sim: isaac" in texts
+    assert msgs[-1]["status"] == "finished"
+    r = gz_client.post("/api/runs", json={"graph": g, "settings": {"simulator": "isaac", "vehicle": "iris"}})
+    assert r.status_code == 409 and "FireFly only" in r.json()["detail"]
+
+
+def test_isaac_needs_isaac_sim_but_not_gazebo(tmp_path, monkeypatch):
+    from rowpilot.editor import runs
+
+    ap = tmp_path / "ardupilot" / "build/sitl/bin"
+    ap.mkdir(parents=True)
+    (ap / "arducopter").touch()
+    monkeypatch.setattr(runs, "REPO", tmp_path)
+    for f in (".venv-sim/bin/python", "build/vio/vio_bridge"):
+        (tmp_path / f).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / f).touch()
+    setup = runs.GazeboSetup(
+        ardupilot=tmp_path / "ardupilot",
+        ardupilot_gazebo=tmp_path / "none",
+        script=FAKE_SIM,
+        isaac_python=tmp_path / "no-isaac",
+    )
+    monkeypatch.setenv("PATH", str(tmp_path))  # no gz command
+    assert setup.missing("isaac") == ["Isaac Sim (scripts/setup_isaac_sim.sh)"]
+    assert any("ardupilot_gazebo" in m for m in setup.missing("gazebo"))
+    assert "Gazebo Harmonic (the gz command)" in setup.missing("gazebo")
+    (tmp_path / "no-isaac").touch()
+    assert setup.missing("isaac") == []
+
+
 def test_python_runs_say_which_simulator_they_use(client):
     g = client.get("/api/default-tree", params={"lanes": 1}).json()
     run = client.post("/api/runs", json={"graph": g, "settings": FAST}).json()
