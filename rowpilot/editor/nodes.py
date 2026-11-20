@@ -16,6 +16,7 @@ Lanes are numbered from 1 here, as in the node names ("Lane 1"); the mission cod
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -47,10 +48,34 @@ from ..mission import (
     VOHealthy,
     VOLostBriefly,
 )
+from ..trolley import (
+    Dock,
+    DriveAlongRail,
+    FailsafeReverseOut,
+    GoToRailStart,
+    LocalizationOK,
+    MotorsOn,
+    MountRail,
+    MustStopNow,
+    OnRail,
+    ReturnToDock,
+    ReverseOut,
+    Stop,
+    StopHere,
+    TrolleySim,
+)
 
 GRAPH_VERSION = 1
 
 COMPOSITE, DECORATOR, CONDITION, ACTION = "composite", "decorator", "condition", "action"
+ROBOTS = ("drone", "trolley")
+DRONE, TROLLEY = ("drone",), ("trolley",)
+ROBOT_NAMES = {"drone": "the drone", "trolley": "the pipe-rail trolley"}
+
+
+def robot_of(ctx: MissionContext) -> str:
+    """The robot a mission context drives."""
+    return "trolley" if isinstance(ctx.vehicle, TrolleySim) else "drone"
 
 
 @dataclass(frozen=True)
@@ -111,6 +136,7 @@ class NodeType:
     build: Builder
     params: tuple[Param, ...] = ()
     group: str = ""
+    robots: tuple[str, ...] = ROBOTS  # the robots it makes sense for
 
     @property
     def children(self) -> tuple[int, int | None]:
@@ -127,6 +153,7 @@ class NodeType:
             "params": [p.describe() for p in self.params],
             "min_children": lo,
             "max_children": hi,
+            "robots": list(self.robots),
         }
 
 
@@ -400,6 +427,71 @@ NODE_TYPES: dict[str, NodeType] = {
 }
 
 
+# The drone's flying and lane-sweeping nodes; the rest so far suit both robots.
+_DRONE_ONLY = {
+    "MustLandNow", "Airborne", "Takeoff", "Hover", "GoToPoint", "ReturnHome", "FailsafeReturnHome", "Land",
+    "MissionLand", "GoToLaneEntry", "AlignToLane", "SweepLane", "TurnAround", "ExitLane",
+}  # fmt: skip
+NODE_TYPES = {k: dataclasses.replace(t, robots=DRONE) if k in _DRONE_ONLY else t for k, t in NODE_TYPES.items()}
+
+# ---- the pipe-rail trolley's nodes (trolley.py) ----------------------------------------------------
+NODE_TYPES.update(
+    {
+        t.type: t
+        for t in [
+            NodeType(
+                "LocalizationOK", CONDITION, "Visual odometry is tracking, or the trolley is on the rails.",
+                _leaf(LocalizationOK), robots=TROLLEY,
+            ),
+            NodeType("OnRail", CONDITION, "The trolley is on a lane's rails (rail contact).", _leaf(OnRail),
+                     robots=TROLLEY),
+            NodeType("MotorsOn", CONDITION, "The motors are on (not docked or stopped for good).", _leaf(MotorsOn),
+                     robots=TROLLEY),
+            NodeType(
+                "MustStopNow", CONDITION,
+                "Battery critical, or visual odometry lost too long on the concrete: stop where it is.",
+                _leaf(MustStopNow), robots=TROLLEY,
+            ),
+            NodeType("Stop", ACTION, "Stands still (always RUNNING).", _leaf(Stop), group="drive", robots=TROLLEY),
+            NodeType("StopHere", ACTION, "Stops where it is and switches the motors off.", _leaf(StopHere),
+                     group="drive", robots=TROLLEY),
+            NodeType("ReturnToDock", ACTION, "Drives along the headland to the dock.", _leaf(ReturnToDock),
+                     group="drive", robots=TROLLEY),
+            NodeType("Dock", ACTION, "At the dock: stops and switches the motors off; stays done.", _leaf(Dock),
+                     group="drive", robots=TROLLEY),
+            NodeType(
+                "GoToRailStart", ACTION, "Drives along the headland to a lane's rail start, lined up to mount.",
+                lambda name, p, ctx, ch: GoToRailStart(name, ctx, p["lane"] - 1), (LANE,), group="rail",
+                robots=TROLLEY,
+            ),
+            NodeType(
+                "MountRail", ACTION,
+                "Drives onto the lane's rails; backs up and tries again if not lined up (3 tries).",
+                lambda name, p, ctx, ch: MountRail(name, ctx, p["lane"] - 1), (LANE,), group="rail", robots=TROLLEY,
+            ),
+            NodeType(
+                "DriveAlongRail", ACTION,
+                "Along the rails to the far end; stops for anything in the way and waits for it to go.",
+                lambda name, p, ctx, ch: DriveAlongRail(name, ctx, p["lane"] - 1, p["obstacle_timeout_s"]),
+                (LANE, Param("obstacle_timeout_s", "float", 60.0, "give up waiting after (s)", min=1)),
+                group="rail", robots=TROLLEY,
+            ),
+            NodeType(
+                "ReverseOut", ACTION, "Back along the rails and off them, onto the concrete.",
+                lambda name, p, ctx, ch: ReverseOut(name, ctx, p["lane"] - 1, final=p["final"]),
+                (LANE, Param("final", "bool", True, "the lane counts as done when out")),
+                group="rail", robots=TROLLEY,
+            ),
+            NodeType(
+                "FailsafeReverseOut", ACTION,
+                "ReverseOut as a failsafe: marks the mission aborted (battery low); nothing to do off the rails.",
+                _leaf(FailsafeReverseOut), group="rail", robots=TROLLEY,
+            ),
+        ]
+    }
+)  # fmt: skip
+
+
 def node_types() -> list[dict]:
     return [t.describe() for t in NODE_TYPES.values()]
 
@@ -419,7 +511,7 @@ class _Checked:
     params: dict[str, dict] = field(default_factory=dict)
 
 
-def _check(graph: dict, n_lanes: int) -> _Checked:
+def _check(graph: dict, n_lanes: int, robot: str = "drone") -> _Checked:
     errors: list[dict] = []
 
     def err(node: str | None, msg: str) -> None:
@@ -451,6 +543,11 @@ def _check(graph: dict, n_lanes: int) -> _Checked:
         if t is None:
             err(nid, f"unknown node type {n.get('type')!r}")
             continue
+        if robot not in t.robots:
+            err(
+                nid,
+                f"{name}: {t.type} is for {' and '.join(ROBOT_NAMES[r] for r in t.robots)}, not {ROBOT_NAMES[robot]}",
+            )
         given = dict(n.get("params") or {})
         p = {}
         for spec in t.params:
@@ -522,10 +619,10 @@ def _check(graph: dict, n_lanes: int) -> _Checked:
     return _Checked(root, nodes, ordered, params)
 
 
-def validate(graph: dict, layout: GreenhouseLayout) -> list[dict]:
+def validate(graph: dict, layout: GreenhouseLayout, robot: str = "drone") -> list[dict]:
     """Problems that would stop the graph from running, as [{"node": id or None, "message": ...}]."""
     try:
-        _check(graph, layout.n_lanes)
+        _check(graph, layout.n_lanes, robot)
     except GraphError as e:
         return e.errors
     return []
@@ -533,7 +630,7 @@ def validate(graph: dict, layout: GreenhouseLayout) -> list[dict]:
 
 def build_from_graph(graph: dict, ctx: MissionContext) -> py_trees.behaviour.Behaviour:
     """The py_trees tree for a graph. Every behaviour gets graph_id, the id of its graph node."""
-    g = _check(graph, ctx.layout.n_lanes)
+    g = _check(graph, ctx.layout.n_lanes, robot_of(ctx))
 
     def make(nid: str) -> py_trees.behaviour.Behaviour:
         n = g.nodes[nid]
@@ -566,7 +663,22 @@ def _add_lane(add, k: int, closed_end: bool) -> str:
     return add("Sequence", n, steps)
 
 
-def lane_graph(lane: int, closed_end: bool = True) -> dict:
+def _add_trolley_lane(add, k: int) -> str:
+    """The trolley's lane k (from 1): to the rail start, onto the rails, along them, back out."""
+    n = f"Lane {k}"
+    return add(
+        "Sequence",
+        n,
+        [
+            add("GoToRailStart", f"{n}: GoToRailStart", lane=k),
+            add("MountRail", f"{n}: MountRail", lane=k),
+            add("DriveAlongRail", f"{n}: DriveAlongRail", lane=k),
+            add("ReverseOut", f"{n}: ReverseOut", lane=k),
+        ],
+    )
+
+
+def lane_graph(lane: int, closed_end: bool = True, robot: str = "drone") -> dict:
     """One lane's subtree as a graph, as in the mission tree: for the editor's Add lane.
     "root" is the lane's Sequence; ids are local (the editor renumbers them)."""
     nodes: list[dict] = []
@@ -578,15 +690,15 @@ def lane_graph(lane: int, closed_end: bool = True) -> dict:
         edges.extend({"source": nid, "target": c} for c in children)
         return nid
 
-    root = _add_lane(add, lane, closed_end)
+    root = _add_trolley_lane(add, lane) if robot == "trolley" else _add_lane(add, lane, closed_end)
     graph = {"version": GRAPH_VERSION, "nodes": nodes, "edges": edges, "root": root}
     tidy_layout(graph)
     return graph
 
 
-def default_graph(layout: GreenhouseLayout) -> dict:
-    """mission.build_tree as a graph: the starting point in the editor. Building it gives the same
-    tree (tests/test_editor.py runs both and compares)."""
+def default_graph(layout: GreenhouseLayout, robot: str = "drone") -> dict:
+    """mission.build_tree (the drone) or trolley.build_trolley_tree as a graph: the starting point in the
+    editor. Building it gives the same tree (tests/test_editor.py runs both and compares)."""
     nodes: list[dict] = []
     edges: list[dict] = []
 
@@ -595,6 +707,9 @@ def default_graph(layout: GreenhouseLayout) -> dict:
         nodes.append({"id": nid, "type": type_, "name": name, "params": params})
         edges.extend({"source": nid, "target": c} for c in children)
         return nid
+
+    if robot == "trolley":
+        return _trolley_graph(add, nodes, edges, layout)
 
     # Children are added before their parent, so ids grow bottom-up; tidy_layout puts them in order.
     healthy = add(
@@ -632,6 +747,42 @@ def default_graph(layout: GreenhouseLayout) -> dict:
             add("ReturnHome", "ReturnHome"),
             add("MissionLand", "Land"),
         ],
+    )
+    add("Sequence", "Root", [guard, mission])
+    graph = {"version": GRAPH_VERSION, "nodes": nodes, "edges": edges}
+    tidy_layout(graph)
+    return graph
+
+
+def _trolley_graph(add, nodes: list, edges: list, layout: GreenhouseLayout) -> dict:
+    healthy = add(
+        "Sequence",
+        "AllHealthy",
+        [
+            add("NotAborted", "NotAborted"),
+            add("BatteryAboveReserve", "BatteryAboveReserve"),
+            add("LocalizationOK", "LocalizationOK"),
+        ],
+    )
+    glitch = add("Sequence", "PoseGlitch", [add("VOLostBriefly", "VOLostBriefly"), add("Stop", "Stop")])
+    emergency = add("Sequence", "EmergencyStop", [add("MustStopNow", "MustStopNow"), add("StopHere", "StopHere")])
+    home = add(
+        "Sequence",
+        "ReturnAndDock",
+        [
+            add("MotorsOn", "MotorsOn"),
+            add("FailsafeReverseOut", "Failsafe: ReverseOut"),
+            add("ReturnToDock", "Failsafe: ReturnToDock"),
+            add("Dock", "Failsafe: Dock"),
+        ],
+    )
+    choice = add("Selector", "FailsafeChoice", [glitch, emergency, home])
+    guard = add("Selector", "SafetyGuard", [healthy, add("SuccessIsFailure", "Failsafe", [choice])])
+    lanes = [_add_trolley_lane(add, k) for k in range(1, layout.n_lanes + 1)]
+    mission = add(
+        "Sequence",
+        "Mission",
+        [add("Preflight", "Preflight"), *lanes, add("ReturnToDock", "ReturnToDock"), add("Dock", "Dock")],
     )
     add("Sequence", "Root", [guard, mission])
     graph = {"version": GRAPH_VERSION, "nodes": nodes, "edges": edges}

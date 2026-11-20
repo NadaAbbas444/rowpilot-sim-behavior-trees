@@ -22,6 +22,7 @@ Contents
 14. [What the cameras see](#14-what-the-cameras-see)
 15. [Parameters you may want to change](#15-parameters-you-may-want-to-change)
 16. [Adding a node to the tree](#16-adding-a-node-to-the-tree)
+17. [The pipe-rail trolley](#17-the-pipe-rail-trolley)
 
 ---
 
@@ -512,3 +513,65 @@ Example: take a photo of every plant position.
    `feedback_message`.
 5. Add a test in `tests/test_mission.py` that runs a mission in the Python simulator and checks the
    events (see the existing tests), and run `pytest -q`.
+
+## 17. The pipe-rail trolley
+
+A second robot on the same framework (`rowpilot/trolley.py`): the pipe-rail trolley of tomato
+greenhouses, a long low chassis (1.5 x 0.6 m here) with flanged wheels that ride on the two heating
+pipes of a lane (0.55 m apart, the pipes already in the greenhouse world) and small wheels for the
+concrete in the headland. It carries the same D435i at its front. Python simulator only, so far.
+
+**Plain motor control.** The tree sends a forward speed and a turn rate (`Command.vx`, `Command.yaw_rate`;
+`vy` and `vz` are ignored), answered with a 0.25 s motor lag. No flight controller, no MAVLink.
+
+**What the simulator models** (`TrolleySim`, a `SimVehicle` underneath for the depth camera, the visual
+odometry and the battery):
+- on the concrete it drives and turns on the spot; touching a crop row or the facade is a crash;
+- it mounts when its chassis reaches the rail start lined up within 6 cm and 4 deg (the rail starts'
+  lead-in); worse is a collision with the rail ends; on the rails it moves only along the lane; past the
+  rail end it derails; reversing off the rail start puts it back on the concrete;
+- `VehicleState.on_rail` is its rail contact switch: which lane's rails it is on;
+- obstacles (`TrolleyConfig.obstacles`: position, radius, from/until) are seen by the depth camera and
+  are a crash if driven into.
+
+**Localization.** On the concrete: visual odometry, drifting as the drone's. On the rails: the rails fix
+y and heading, wheel odometry gives x; visual odometry is not needed (`LocalizationOK` passes on the
+rails without it). Every rail start is a landmark: mounting and dismounting re-localize it.
+
+**The tree** (`build_trolley_tree`; in the editor, the default tree for the trolley):
+
+```
+Root (Sequence)
+├── SafetyGuard (Selector)
+│   ├── AllHealthy: NotAborted, BatteryAboveReserve, LocalizationOK
+│   └── Failsafe
+│       ├── PoseGlitch: VOLostBriefly -> Stop                        on the concrete: wait it out
+│       ├── EmergencyStop: MustStopNow -> StopHere                   battery critical / lost > 3 s off the rails
+│       └── ReturnAndDock: MotorsOn -> ReverseOut -> ReturnToDock -> Dock   low battery, a failed step
+└── Mission: Preflight, Lane 1 .. Lane n, ReturnToDock, Dock
+    Lane k: GoToRailStart -> MountRail -> DriveAlongRail -> ReverseOut
+```
+
+| Node | What it does |
+|---|---|
+| `GoToRailStart` | along the headland line (front 1.5 m short of the rail starts) to the lane's rails, facing along them |
+| `MountRail` | drives on, steering on visual odometry; 0.25 m before the rail start it checks 3 cm / 2.5 deg, else backs up and retries (3 tries) |
+| `DriveAlongRail` | to 0.5 m short of the rail end, slowing down near it; stops 0.45 m from anything in the way, waits, gives up after 60 s ("lane blocked") |
+| `ReverseOut` | back along the rails and off them; the lane counts as done |
+| `ReturnToDock`, `Dock` | along the headland line to the dock; stop, motors off |
+| `Stop`, `StopHere` | stand still (waiting); stop and switch the motors off |
+
+The run ends when the motors are off (`at_rest`), not when it stands still: it stands still while it
+waits for a worker to move.
+
+**Results** (default settings, `tests/test_trolley.py`): every lane, docked, ~330 s and 11 % of the
+battery for six lanes; 30 of 30 seeds complete. Waits for a worker and carries on; abandons a lane
+blocked for good and docks; docks on a low battery; on the rails a loss of visual odometry does not
+matter, on the concrete a short one is waited out and a long one stops it.
+
+**Limits.** It lines up on visual odometry alone. With twice the default drift, the error in its own
+estimate exceeds the 6 cm lead-in in about half the runs and it meets the rail start misaligned (its
+check passes on a wrong estimate). The depth camera does not help here: at the row ends it sees the
+ragged ends of the crop rows, and mixing it in made the line-up worse (2.8 cm instead of 1.8 cm). A real
+trolley would want a fix at each rail start: a marker, or detecting the rails themselves.
+

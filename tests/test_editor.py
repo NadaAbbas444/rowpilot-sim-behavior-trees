@@ -130,11 +130,15 @@ def test_parameters_are_checked():
 
 
 def test_every_node_type_builds_with_its_defaults():
+    from rowpilot.trolley import TrolleySim
+
     lay = GreenhouseLayout(n_lanes=2)
-    ctx = MissionContext(SimVehicle(lay), lay)
+    ctxs = {"drone": MissionContext(SimVehicle(lay), lay), "trolley": MissionContext(TrolleySim(lay), lay)}
     for t in NODE_TYPES.values():
+        robot = t.robots[0]  # build it for a robot it is for
+        ctx, leaf = ctxs[robot], {"drone": "Hover", "trolley": "Stop"}[robot]
         lo, _ = t.children
-        nodes = [node("p", t.type)] + [node(f"c{i}", "Hover") for i in range(lo)]
+        nodes = [node("p", t.type)] + [node(f"c{i}", leaf) for i in range(lo)]
         g = small(*nodes, edges=[("p", f"c{i}") for i in range(lo)])
         assert build_from_graph(g, ctx).graph_id == "p", t.type
 
@@ -406,3 +410,43 @@ def test_one_lane_is_the_mission_trees_lane(client, open_ends):
     root = next(n for n in lane["nodes"] if n["id"] == lane["root"])
     assert root["name"] == "Lane 3" and all("position" in n for n in lane["nodes"])
     assert client.get("/api/lane", params={"lane": 0}).status_code == 422
+
+
+# ---- the pipe-rail trolley ------------------------------------------------------------------------
+def test_trolley_default_graph_builds_and_flies_exactly_like_its_tree():
+    from rowpilot.trolley import TrolleySim, build_trolley_tree
+
+    lay = GreenhouseLayout(n_lanes=2)
+    graph = default_graph(lay, "trolley")
+    ctx = MissionContext(TrolleySim(lay), lay)
+    assert names_types(build_from_graph(graph, ctx)) == names_types(build_trolley_tree(ctx))
+    a = run_mission(RunConfig(layout=lay, robot="trolley"))
+    b = run_mission(RunConfig(layout=lay, robot="trolley"), tree_factory=lambda ctx: build_from_graph(graph, ctx))
+    assert a.outcome == b.outcome == "completed"
+    assert [{k: v for k, v in e.items() if k != "id"} for e in b.events] == a.events
+
+
+def test_each_robot_gets_its_own_nodes():
+    lay = GreenhouseLayout(n_lanes=1)
+    assert validate(default_graph(lay, "trolley"), lay, "trolley") == []
+    wrong = validate(default_graph(lay), lay, "trolley")
+    assert any("Takeoff is for the drone, not the pipe-rail trolley" in e["message"] for e in wrong)
+    wrong = validate(default_graph(lay, "trolley"), lay, "drone")
+    assert any("MountRail is for the pipe-rail trolley, not the drone" in e["message"] for e in wrong)
+    shared = {t.type for t in NODE_TYPES.values() if set(t.robots) == {"drone", "trolley"}}
+    assert {"Sequence", "Selector", "NotAborted", "BatteryAboveReserve", "Preflight", "Wait"} <= shared
+
+
+def test_trolley_runs_from_the_editor_in_the_python_simulator_only(client):
+    g = client.get("/api/default-tree", params={"lanes": 1, "robot": "trolley"}).json()
+    assert any(n["type"] == "MountRail" for n in g["nodes"])
+    lane = client.get("/api/lane", params={"lane": 2, "robot": "trolley"}).json()
+    assert {n["type"] for n in lane["nodes"]} >= {"GoToRailStart", "MountRail", "DriveAlongRail", "ReverseOut"}
+    types = {t["type"]: t for t in client.get("/api/node-types").json()}
+    assert types["MountRail"]["robots"] == ["trolley"] and types["Takeoff"]["robots"] == ["drone"]
+    run = client.post("/api/runs", json={"graph": g, "settings": {**FAST, "robot": "trolley"}}).json()
+    msgs = stream_all(client, run["id"])
+    assert msgs[-1]["status"] == "finished" and msgs[-1]["summary"]["outcome"] == "completed"
+    assert any("pipe-rail trolley" in m.get("msg", "") for m in msgs if m["kind"] == "event")
+    r = client.post("/api/runs", json={"graph": g, "settings": {**FAST, "robot": "trolley", "simulator": "gazebo"}})
+    assert r.status_code == 409 and "Python simulator only" in r.json()["detail"]

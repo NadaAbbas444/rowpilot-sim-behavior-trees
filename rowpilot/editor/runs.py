@@ -49,6 +49,7 @@ class Settings:
     """What the editor's Run panel sets: the simulator, the greenhouse and the mission."""
 
     simulator: str = "python"  # "python" or "gazebo"
+    robot: str = "drone"  # "drone" (the FireFly 2) or "trolley" (the pipe-rail trolley: Python simulator only)
     lanes: int = 6
     open_ends: bool = False
     row_length: float = GreenhouseLayout.row_length
@@ -83,6 +84,7 @@ class Settings:
             ),
             mission=MissionParams(altitude=self.altitude, sweep_speed=self.sweep_speed),
             max_time_s=self.max_time_s,
+            robot=self.robot,
         )
 
     def greenhouse_args(self) -> list[str]:
@@ -124,11 +126,18 @@ class Run:
     def _run(self) -> None:
         s = self.settings
         wall0 = time.monotonic()
-        self._system(
-            "sim",
-            "Python simulator: the tree, lane perception and control against a modelled drone "
-            "(no Gazebo, ArduPilot or OpenVINS; choose Gazebo in Run settings for those)",
-        )
+        if s.robot == "trolley":
+            self._system(
+                "sim",
+                "Python simulator: the tree drives a modelled pipe-rail trolley (plain motor control: on the "
+                "rails in the lanes, on the concrete in the headland)",
+            )
+        else:
+            self._system(
+                "sim",
+                "Python simulator: the tree, lane perception and control against a modelled drone "
+                "(no Gazebo, ArduPilot or OpenVINS; choose Gazebo in Run settings for those)",
+            )
 
         def on_tick(row: dict) -> bool:
             self._push({"kind": "tick", **row})
@@ -412,6 +421,10 @@ class RunManager:
 
     def start(self, graph: dict, settings: Settings) -> Run:
         active = [r for r in self.runs.values() if not r.done]
+        if settings.robot not in ("drone", "trolley"):
+            raise ValueError(f"unknown robot {settings.robot!r}")
+        if settings.robot == "trolley" and settings.simulator != "python":
+            raise ValueError("the pipe-rail trolley runs in the Python simulator only, so far")
         if settings.simulator == "gazebo":
             missing = self.gazebo.missing()
             if missing:

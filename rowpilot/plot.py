@@ -6,7 +6,7 @@ from .layout import GreenhouseLayout
 from .runner import RunResult
 
 
-def plot_run(result: RunResult, layout: GreenhouseLayout, path: str) -> None:
+def plot_run(result: RunResult, layout: GreenhouseLayout, path: str, robot: str = "drone") -> None:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -22,7 +22,15 @@ def plot_run(result: RunResult, layout: GreenhouseLayout, path: str) -> None:
                 (0, c - layout.crop_width / 2), layout.row_length, layout.crop_width, color="#5b8c3a", alpha=0.85, lw=0
             )
         )
-    px, py = zip(*layout.planned_route(), strict=True)
+    if robot == "trolley":
+        from .trolley import planned_route as trolley_route
+
+        for y in (layout.lane_center_y(i) + s * 0.275 for i in range(layout.n_lanes) for s in (-1, 1)):
+            ax.plot([0, layout.row_length], [y, y], color="#999999", lw=0.8, zorder=0)  # the heating-pipe rails
+        route = trolley_route(layout)
+    else:
+        route = layout.planned_route()
+    px, py = zip(*route, strict=True)
     ax.plot(px, py, color="#2ca02c", lw=3.2, alpha=0.35, solid_joinstyle="round", label="planned path", zorder=1)
     xs, ys = [t["x"] for t in result.trace], [t["y"] for t in result.trace]
     ax.plot(

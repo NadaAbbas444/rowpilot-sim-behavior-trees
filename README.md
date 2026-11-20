@@ -62,6 +62,27 @@ pytest -q
 
 Each run writes `events.jsonl` (every node's status changes and log lines), `trace.csv` (true and estimated pose, battery and active node at 10 Hz), `summary.json` and `path.png`.
 
+## A second robot: the pipe-rail trolley
+
+The same framework drives a ground robot too: a **pipe-rail trolley**, the work trolley of tomato greenhouses, which rides on the two heating pipes in each lane and drives on the concrete path in the headland. It is driven by plain motor control (a forward speed and a turn rate, no flight controller), and has its own mission tree with the drone's safety guard:
+
+```
+Lane k: GoToRailStart -> MountRail -> DriveAlongRail -> ReverseOut      (then ReturnToDock, Dock)
+```
+
+- **On the rails** it cannot leave the lane or steer: it drives to the rail end and reverses back out (no turning round). The rails fix its position across the lane and its heading, and the wheels measure how far along it is, so visual odometry is not needed there.
+- **Mounting**: it lines up in the headland and drives onto the rails; just before the rail start it checks it is lined up (3 cm, 2.5 deg) and otherwise backs up and tries again (three tries). Every rail start re-localizes it.
+- **Failsafes**: an obstacle on the rails (a worker, a harvest trolley) is waited for, and a lane blocked for good is abandoned (reverse out, back to the dock); a low battery reverses out and docks; a short loss of visual odometry on the concrete is waited out, a long one stops it.
+
+```bash
+python -m rowpilot run --robot trolley --out runs/trolley
+python -m rowpilot tree --robot trolley
+```
+
+In the editor: *Run settings* -> *Robot* -> *Pipe-rail trolley* loads its mission tree and its nodes in the palette. Python simulator only, so far. With the default visual odometry drift it completes 30 of 30 seeded runs; with twice the drift the error in its own estimate exceeds the rails' lead-in (6 cm) and it meets the rail start misaligned: a real trolley would need a better fix at the rail start (a marker or a rail detector). Details: [docs/how-it-works.md](docs/how-it-works.md#17-the-pipe-rail-trolley).
+
+![The pipe-rail trolley's mission: every lane up the rails and back, along the headland between lanes, docked](docs/trolley-run.png)
+
 ## Behaviour tree editor
 
 Draw or change the tree in the browser, run it and watch every node live: running nodes light up, each node keeps its own log, and a map shows the flight. Run it in the fast Python simulator, or in the full chain (Gazebo + ArduPilot SITL + OpenVINS), with ArduPilot's, EKF3's and OpenVINS's messages in the log next to the tree's. React + React Flow page, FastAPI server running the same tree code. **[docs/editor.md](docs/editor.md)**

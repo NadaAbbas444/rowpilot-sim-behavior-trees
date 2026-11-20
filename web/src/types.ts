@@ -1,7 +1,7 @@
 // Shapes shared with the Python server (rowpilot/editor). See server.py for the API.
 
-export type Category = 'composite' | 'decorator' | 'condition' | 'action';
-export type ParamKind = 'int' | 'float' | 'bool' | 'choice' | 'lane';
+export type Category = "composite" | "decorator" | "condition" | "action";
+export type ParamKind = "int" | "float" | "bool" | "choice" | "lane";
 export type ParamValue = number | boolean | string;
 
 export interface ParamSpec {
@@ -18,6 +18,7 @@ export interface NodeTypeSpec {
   type: string;
   category: Category;
   group: string;
+  robots: Robot[];
   help: string;
   params: ParamSpec[];
   min_children: number;
@@ -48,13 +49,17 @@ export interface GraphIssue {
   message: string;
 }
 
-export type Status = 'RUNNING' | 'SUCCESS' | 'FAILURE' | 'INVALID';
+export type Status = "RUNNING" | "SUCCESS" | "FAILURE" | "INVALID";
 
-export type Simulator = 'python' | 'gazebo';
+export type Simulator = "python" | "gazebo";
+
+/** The FireFly 2 drone, or the pipe-rail trolley (Python simulator only, so far). */
+export type Robot = "drone" | "trolley";
 
 export interface Settings {
   simulator: Simulator;
-  vehicle: 'firefly' | 'iris';
+  robot: Robot;
+  vehicle: "firefly" | "iris";
   gazebo_window: boolean;
   lanes: number;
   open_ends: boolean;
@@ -71,9 +76,9 @@ export interface Settings {
 }
 
 export interface EventMsg {
-  kind: 'event';
+  kind: "event";
   t: number;
-  type: 'status' | 'log' | 'end' | 'system';
+  type: "status" | "log" | "end" | "system";
   node: string;
   source?: string; // system messages: ardupilot, mavlink, ekf, vio, sim, setup, editor
   id?: string;
@@ -82,7 +87,7 @@ export interface EventMsg {
 }
 
 export interface TickMsg {
-  kind: 'tick';
+  kind: "tick";
   t: number;
   x: number;
   y: number;
@@ -105,8 +110,8 @@ export interface Summary {
 }
 
 export interface EndMsg {
-  kind: 'end';
-  status: 'finished' | 'stopped' | 'error';
+  kind: "end";
+  status: "finished" | "stopped" | "error";
   summary: Summary | null;
   error: string | null;
 }
@@ -127,7 +132,10 @@ export interface LayoutInfo {
   planned_route: [number, number][];
 }
 
-export type Simulators = Record<Simulator, { available: boolean; missing: string[] }>;
+export type Simulators = Record<
+  Simulator,
+  { available: boolean; missing: string[] }
+>;
 
 export interface RunInfo {
   id: string;

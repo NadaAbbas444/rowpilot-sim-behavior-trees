@@ -23,7 +23,8 @@ class VehicleState:
     vo_healthy: bool
     battery_pct: float
     armed: bool
-    landed: bool
+    landed: bool  # drone: on the ground; ground robot: standing still
+    on_rail: int | None = None  # pipe-rail robots: the lane whose rails it is on (rail contact), else None
 
 
 class Vehicle(Protocol):

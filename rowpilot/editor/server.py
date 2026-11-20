@@ -30,6 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..layout import GreenhouseLayout
+from ..trolley import planned_route as trolley_route
 from .nodes import GRAPH_VERSION, default_graph, lane_graph, node_types, validate
 from .runs import GazeboSetup, RunManager, Settings
 
@@ -58,6 +59,7 @@ class Graph(BaseModel):
 
 class SettingsModel(BaseModel):
     simulator: Literal["python", "gazebo"] = "python"
+    robot: Literal["drone", "trolley"] = "drone"
     vehicle: Literal["firefly", "iris"] = "firefly"
     gazebo_window: bool = True
     lanes: int = Field(6, ge=1, le=20)
@@ -86,7 +88,7 @@ def _graph(g: Graph) -> dict:
     return g.model_dump(exclude_none=True)
 
 
-def layout_info(lay: GreenhouseLayout) -> dict:
+def layout_info(lay: GreenhouseLayout, robot: str = "drone") -> dict:
     return {
         "n_lanes": lay.n_lanes,
         "row_length": lay.row_length,
@@ -98,7 +100,7 @@ def layout_info(lay: GreenhouseLayout) -> dict:
         "home": lay.home,
         "crop_rows_y": lay.crop_row_centers_y(),
         "lane_centers_y": [lay.lane_center_y(i) for i in range(lay.n_lanes)],
-        "planned_route": lay.planned_route(),
+        "planned_route": trolley_route(lay) if robot == "trolley" else lay.planned_route(),
     }
 
 
@@ -125,12 +127,20 @@ def create_app(
         return node_types()
 
     @app.get("/api/default-tree")
-    def get_default_tree(lanes: Annotated[int, Query(ge=1, le=20)] = 6, open_ends: bool = False) -> dict:
-        return default_graph(GreenhouseLayout(n_lanes=lanes, closed_end=not open_ends))
+    def get_default_tree(
+        lanes: Annotated[int, Query(ge=1, le=20)] = 6,
+        open_ends: bool = False,
+        robot: Literal["drone", "trolley"] = "drone",
+    ) -> dict:
+        return default_graph(GreenhouseLayout(n_lanes=lanes, closed_end=not open_ends), robot)
 
     @app.get("/api/lane")
-    def get_lane(lane: Annotated[int, Query(ge=1, le=20)], open_ends: bool = False) -> dict:
-        return lane_graph(lane, closed_end=not open_ends)
+    def get_lane(
+        lane: Annotated[int, Query(ge=1, le=20)],
+        open_ends: bool = False,
+        robot: Literal["drone", "trolley"] = "drone",
+    ) -> dict:
+        return lane_graph(lane, closed_end=not open_ends, robot=robot)
 
     @app.get("/api/layout")
     def get_layout(
@@ -138,9 +148,11 @@ def create_app(
         open_ends: bool = False,
         row_length: Annotated[float, Query(ge=3, le=100)] = GreenhouseLayout.row_length,
         path_width: Annotated[float, Query(ge=0.8, le=4)] = 1.6,
+        robot: Literal["drone", "trolley"] = "drone",
     ) -> dict:
         return layout_info(
-            GreenhouseLayout(n_lanes=lanes, row_length=row_length, path_width=path_width, closed_end=not open_ends)
+            GreenhouseLayout(n_lanes=lanes, row_length=row_length, path_width=path_width, closed_end=not open_ends),
+            robot,
         )
 
     @app.get("/api/simulators")
@@ -153,12 +165,13 @@ def create_app(
 
     @app.post("/api/validate")
     def post_validate(req: RunRequest) -> dict:
-        return {"errors": validate(_graph(req.graph), req.settings.settings().layout())}
+        s = req.settings.settings()
+        return {"errors": validate(_graph(req.graph), s.layout(), s.robot)}
 
     @app.post("/api/runs", status_code=201)
     def post_run(req: RunRequest) -> dict:
         graph, settings = _graph(req.graph), req.settings.settings()
-        errors = validate(graph, settings.layout())
+        errors = validate(graph, settings.layout(), settings.robot)
         if errors:
             raise HTTPException(422, detail={"errors": errors})
         try:

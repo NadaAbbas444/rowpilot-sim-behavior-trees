@@ -33,14 +33,16 @@ python -m rowpilot run --out runs/nominal
 | `--speed M_S` | 0.8 | sweep speed |
 | `--out DIR` | – | save `events.jsonl`, `trace.csv`, `summary.json`, `path.png` there |
 | `--quiet` | off | print only the summary |
+| `--robot trolley` | drone | the pipe-rail trolley instead of the drone (its own tree; `--altitude` and `--wind` do not apply) |
 
-Exit code 1 if the drone crashed, else 0.
+Exit code 1 if the robot crashed, else 0.
 
 ## `python -m rowpilot tree`: print the behaviour tree
 
 ```bash
 python -m rowpilot tree             # as text
 python -m rowpilot tree --json      # nodes and edges
+python -m rowpilot tree --robot trolley   # the pipe-rail trolley's tree
 ```
 
 Takes the greenhouse options (`--lanes`, `--length`, `--path-width`, `--open-ends`).
